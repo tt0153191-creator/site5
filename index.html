@@ -3,150 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="referrer" content="no-referrer">
-    <title>Schem Shop</title>
+    <title>Schem Shop - Admin Sync</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     
-    <!-- Firebase SDK -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-
-        const firebaseConfig = JSON.parse(__firebase_config);
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
-        const auth = getAuth(app);
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'digital-store-v2';
-
-        window.db = db;
-        window.appId = appId;
-        window.fb = { doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query };
-
-        const ADMIN_IDS = ['1827728855', '7861794182'];
-
-        async function startAuth() {
-            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                await signInWithCustomToken(auth, __initial_auth_token);
-            } else {
-                await signInAnonymously(auth);
-            }
-
-            onAuthStateChanged(auth, (user) => {
-                if (!user) return;
-
-                const tgUser = window.Telegram.WebApp.initDataUnsafe?.user;
-                const userId = tgUser ? tgUser.id.toString() : '0'; 
-                
-                if (ADMIN_IDS.includes(userId)) {
-                    window.isAdmin = true;
-                    const adminBtn = document.getElementById('nav-admin');
-                    if (adminBtn) adminBtn.classList.remove('hidden');
-                    loadAdminData();
-                }
-
-                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
-                onSnapshot(userRef, (snap) => {
-                    if (snap.exists()) {
-                        const data = snap.data();
-                        const balance = Number(data.balance) || 0;
-                        document.getElementById('balance-display').innerText = `${balance.toFixed(2)} ₽`;
-                        window.currentBalance = balance;
-                    } else if (userId !== '0') {
-                        setDoc(userRef, { 
-                            balance: 0, 
-                            name: tgUser?.first_name || 'User', 
-                            username: tgUser?.username || '',
-                            userId: userId 
-                        });
-                    }
-                }, (err) => console.error("Firestore error:", err));
-            });
-        }
-
-        function loadAdminData() {
-            const reqRef = collection(db, 'artifacts', appId, 'public', 'data', 'deposit_requests');
-            onSnapshot(reqRef, (snap) => {
-                const container = document.getElementById('admin-requests-list');
-                if (!container) return;
-                if (snap.empty) {
-                    container.innerHTML = '<p class="text-center py-10 opacity-30 text-[10px] font-black uppercase">Нет активных заявок</p>';
-                    return;
-                }
-                container.innerHTML = '';
-                snap.forEach(d => {
-                    const req = d.data();
-                    const div = document.createElement('div');
-                    div.className = 'glass-card mb-4 border-green-500/10';
-                    div.innerHTML = `
-                        <div class="flex justify-between items-start mb-4">
-                            <div>
-                                <p class="font-black text-white text-sm uppercase italic">${req.userName}</p>
-                                <p class="text-[9px] text-gray-500">ID: ${req.userId}</p>
-                            </div>
-                            <span class="text-green-400 font-black text-lg">${req.amount} ₽</span>
-                        </div>
-                        ${req.photoUrl ? `<img src="${req.photoUrl}" class="w-full h-32 object-cover rounded-xl mb-4 bg-black">` : ''}
-                        <div class="flex gap-2">
-                            <button class="flex-1 bg-green-600 py-3 rounded-xl text-[9px] font-black uppercase" onclick="approveRequest('${d.id}', '${req.userId}', ${req.amount})">Одобрить</button>
-                            <button class="flex-1 bg-red-600/20 py-3 rounded-xl text-[9px] font-black uppercase" onclick="rejectRequest('${d.id}')">Отклонить</button>
-                        </div>
-                    `;
-                    container.appendChild(div);
-                });
-            });
-
-            const usersRef = collection(db, 'artifacts', appId, 'public', 'data', 'users');
-            onSnapshot(usersRef, (snap) => {
-                const container = document.getElementById('admin-users-list');
-                if (!container) return;
-                container.innerHTML = '';
-                snap.forEach(d => {
-                    const u = d.data();
-                    const div = document.createElement('div');
-                    div.className = 'flex items-center justify-between p-4 bg-black/40 rounded-2xl mb-2 border border-white/5';
-                    div.innerHTML = `
-                        <div class="flex flex-col">
-                            <span class="text-[10px] font-black text-white uppercase italic">${u.name || 'N/A'}</span>
-                            <span class="text-[8px] text-gray-500 font-bold">ID: ${u.userId}</span>
-                        </div>
-                        <div class="text-right">
-                            <span class="text-green-500 font-black text-xs">${u.balance?.toFixed(2) || 0} ₽</span>
-                        </div>
-                    `;
-                    container.appendChild(div);
-                });
-            });
-        }
-
-        window.approveRequest = async (docId, uid, amount) => {
-            try {
-                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', String(uid));
-                const userSnap = await getDoc(userRef);
-                if (userSnap.exists()) {
-                    await updateDoc(userRef, { balance: Number(userSnap.data().balance || 0) + Number(amount) });
-                }
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deposit_requests', docId));
-                window.showToast("ГОТОВО");
-            } catch (e) { window.showToast("ОШИБКА", true); }
-        };
-
-        window.rejectRequest = async (docId) => {
-            try {
-                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deposit_requests', docId));
-                window.showToast("ОТКЛОНЕНО");
-            } catch (e) { window.showToast("ОШИБКА", true); }
-        };
-
-        startAuth();
-    </script>
-
     <style>
         :root { --primary: #4d9251; --primary-dark: #356b38; --bg-dark: #0a0a0a; --card-bg: rgba(22, 22, 22, 0.95); }
         body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; background-color: var(--bg-dark); color: white; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
         
-        /* Звездный фон */
         .stars-background {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%);
@@ -184,11 +48,7 @@
 
         .btn-main { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; border-radius: 22px; padding: 20px; font-weight: 900; display: flex; align-items: center; justify-content: center; width: 100%; border: none; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.75rem; box-shadow: 0 10px 30px rgba(77, 146, 81, 0.25); transition: 0.3s; }
         .btn-main:active { transform: scale(0.96); filter: brightness(1.1); }
-
-        .category-item { background: rgba(30, 30, 30, 0.4); border-radius: 24px; padding: 24px; border: 1px solid rgba(255,255,255,0.03); display: flex; align-items: center; justify-content: space-between; transition: 0.2s; }
-        .category-item:active { background: rgba(60, 60, 60, 0.6); border-color: var(--primary); transform: translateX(5px); }
-        .category-name { font-size: 0.95rem; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; font-style: italic; }
-        .category-icon { background: rgba(255,255,255,0.05); width: 48px; height: 48px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; border: 1px solid rgba(255,255,255,0.02); }
+        .btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
 
         .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.96); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px; backdrop-filter: blur(20px); }
         
@@ -196,6 +56,8 @@
         .admin-subtab.active { display: block; }
         .subtab-btn { flex: 1; padding: 10px; text-align: center; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: #444; border-bottom: 2px solid transparent; }
         .subtab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        #admin-requests-list img { max-height: 200px; width: 100%; object-fit: contain; background: #000; border-radius: 12px; }
     </style>
 </head>
 <body>
@@ -206,7 +68,7 @@
 
     <div class="container-wrapper">
         
-        <!-- ГЛАВНАЯ -->
+        <!-- HOME -->
         <div id="home-tab" class="tab-content active">
             <div class="hero-banner">
                 <img src="https://imgfy.ru/ib/HqoMAyXqRBc9QEn_1771516584.jpg" class="banner-img">
@@ -221,64 +83,64 @@
             <button class="btn-main mt-4" onclick="switchTab('catalog')">В каталог ➔</button>
         </div>
 
-        <!-- КАТАЛОГ -->
+        <!-- CATALOG -->
         <div id="catalog-tab" class="tab-content">
-            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase">КАТАЛОГ</h2>
-            
-            <div class="flex flex-col gap-3">
-                <div class="category-item" onclick="showCategory('Схемы')">
-                    <div class="category-name">СХЕМЫ</div>
-                    <div class="category-icon">💎</div>
+            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase text-white">КАТАЛОГ</h2>
+            <div class="grid grid-cols-1 gap-3">
+                <div class="glass-card flex justify-between items-center py-6" onclick="showCategory('Схемы')">
+                    <span class="font-black italic uppercase">Схемы</span>
+                    <span class="text-xl">💎</span>
                 </div>
-                
-                <div class="category-item" onclick="showCategory('Абузы')">
-                    <div class="category-name">АБУЗЫ</div>
-                    <div class="category-icon">🔥</div>
-                </div>
-                
-                <div class="category-item" onclick="showCategory('Мануалы')">
-                    <div class="category-name">МАНУАЛЫ</div>
-                    <div class="category-icon">📚</div>
-                </div>
-                
-                <div class="category-item" onclick="showCategory('Скрипты')">
-                    <div class="category-name">СКРИПТЫ</div>
-                    <div class="category-icon">⚙️</div>
+                <div class="glass-card flex justify-between items-center py-6" onclick="showCategory('Абузы')">
+                    <span class="font-black italic uppercase">Абузы</span>
+                    <span class="text-xl">🔥</span>
                 </div>
             </div>
         </div>
 
-        <!-- ПРОФИЛЬ -->
+        <!-- PROFILE -->
         <div id="profile-tab" class="tab-content">
             <div class="glass-card text-center">
                 <img id="user-photo" src="https://ui-avatars.com/api/?background=222" class="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-white/5">
-                <h2 id="user-display-name" class="font-black italic uppercase">...</h2>
+                <h2 id="user-display-name" class="font-black italic uppercase text-white">...</h2>
                 <div class="mt-6 p-6 bg-black/40 rounded-3xl">
-                    <p class="text-[9px] text-gray-500 uppercase font-black mb-1">Баланс</p>
+                    <p class="text-[9px] text-gray-500 uppercase font-black mb-1">Ваш Баланс</p>
                     <div id="balance-display" class="text-3xl font-black text-green-400">0.00 ₽</div>
                 </div>
             </div>
             <button class="btn-main mt-4" onclick="openModal('deposit-modal')">💳 Пополнить</button>
         </div>
 
-        <!-- АДМИН-ПАНЕЛЬ -->
+        <!-- ADMIN -->
         <div id="admin-tab" class="tab-content">
+            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase text-white">АДМИН-ЦЕНТР</h2>
             <div class="flex gap-4 mb-6 border-b border-white/5">
                 <div class="subtab-btn active" id="btn-sub-req" onclick="switchAdminSubTab('req')">Заявки</div>
-                <div class="subtab-btn" id="btn-sub-users" onclick="switchAdminSubTab('users')">Пользователи</div>
+                <div class="subtab-btn" id="btn-sub-settings" onclick="switchAdminSubTab('settings')">Настройки</div>
             </div>
             
             <div id="sub-req" class="admin-subtab active">
-                <div id="admin-requests-list"></div>
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-[10px] font-black uppercase text-gray-500">Актуальные запросы</span>
+                    <button onclick="syncAdminData()" class="text-[10px] text-blue-400 font-black uppercase">Обновить 🔄</button>
+                </div>
+                <div id="admin-requests-list" class="space-y-4">
+                    <!-- Заявки будут здесь -->
+                </div>
             </div>
-            
-            <div id="sub-users" class="admin-subtab">
-                <div id="admin-users-list"></div>
+
+            <div id="sub-settings" class="admin-subtab">
+                <div class="glass-card">
+                    <p class="text-[10px] font-black uppercase text-gray-500 mb-4">Управление балансом (Local)</p>
+                    <input type="text" id="target-user-id" placeholder="ID Пользователя" class="w-full bg-black/50 border border-white/10 p-4 rounded-xl mb-2 text-sm">
+                    <input type="number" id="target-amount" placeholder="Сумма" class="w-full bg-black/50 border border-white/10 p-4 rounded-xl mb-4 text-sm">
+                    <button class="btn-main py-4" onclick="manualCredit()">Начислить баланс</button>
+                </div>
             </div>
         </div>
     </div>
 
-    <!-- МОДАЛКА ПОПОЛНЕНИЯ -->
+    <!-- DEPOSIT MODAL -->
     <div id="deposit-modal" class="modal">
         <div class="glass-card w-full max-w-[360px]" id="deposit-form">
             <h2 class="text-xl font-black mb-6 text-center uppercase">Сумма (₽)</h2>
@@ -291,7 +153,7 @@
             <p class="text-[9px] text-gray-500 uppercase font-black mb-4">Перевод OZON</p>
             <div class="bg-black/70 p-6 rounded-3xl mb-6 border border-white/5" onclick="copyCard()">
                 <p class="text-xl font-mono font-black text-green-400">+79509568954</p>
-                <p class="text-[8px] mt-2 text-blue-400 uppercase font-black">Нажмите, чтобы скопировать</p>
+                <p class="text-[8px] mt-2 text-blue-400 uppercase font-black">Нажмите для копирования</p>
             </div>
             <input type="file" id="receipt-file" class="hidden" accept="image/*" onchange="previewImage(this)">
             <div class="w-full h-32 border-2 border-dashed border-white/10 rounded-3xl flex items-center justify-center cursor-pointer mb-6 overflow-hidden bg-black/60" onclick="document.getElementById('receipt-file').click()">
@@ -302,7 +164,7 @@
         </div>
     </div>
 
-    <!-- МЕНЮ -->
+    <!-- NAV -->
     <div class="bottom-nav">
         <div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span>🏠</span>Главная</div>
         <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')"><span>💎</span>Маркет</div>
@@ -313,38 +175,34 @@
     <script>
         const tg = window.Telegram.WebApp;
         const BOT_TOKEN = '7909769159:AAGPXQEYG2LCki54CSI09p2I2_E5w8Lh4D8';
-        const MASTER_ADMIN_ID = '1827728855';
+        const ADMIN_IDS = ['1827728855', '7861794182']; // Ваши ID
+        
+        let state = {
+            balance: parseFloat(localStorage.getItem('user_balance') || '0'),
+            pendingRequests: JSON.parse(localStorage.getItem('admin_requests') || '[]')
+        };
 
-        let currentAmount = 0;
-        let base64Photo = null;
-
-        function createStars() {
-            const container = document.getElementById('stars-container');
-            for (let i = 0; i < 100; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                const size = Math.random() * 2 + 1 + 'px';
-                star.style.width = size;
-                star.style.height = size;
-                star.style.top = Math.random() * 100 + '%';
-                star.style.left = Math.random() * 100 + '%';
-                star.style.setProperty('--duration', Math.random() * 3 + 2 + 's');
-                container.appendChild(star);
-            }
-        }
-
-        function initApp() {
+        function init() {
             tg.expand();
             tg.ready();
             createStars();
+            
             const user = tg.initDataUnsafe?.user;
             if (user) {
                 document.getElementById('user-display-name').innerText = user.first_name.toUpperCase();
                 if (user.photo_url) document.getElementById('user-photo').src = user.photo_url;
-                if (['1827728855', '7861794182'].includes(user.id.toString())) {
+                
+                // Проверка на админа
+                if (ADMIN_IDS.includes(user.id.toString())) {
                     document.getElementById('nav-admin').classList.remove('hidden');
                 }
             }
+            refreshBalanceDisplay();
+        }
+
+        function refreshBalanceDisplay() {
+            document.getElementById('balance-display').innerText = state.balance.toFixed(2) + ' ₽';
+            localStorage.setItem('user_balance', state.balance);
         }
 
         function switchTab(name) {
@@ -353,6 +211,7 @@
             document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             document.getElementById('nav-' + name).classList.add('active');
             tg.HapticFeedback.impactOccurred('medium');
+            if(name === 'admin') syncAdminData();
         }
 
         function switchAdminSubTab(name) {
@@ -360,21 +219,18 @@
             document.getElementById('sub-' + name).classList.add('active');
             document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('btn-sub-' + name).classList.add('active');
-            tg.HapticFeedback.impactOccurred('light');
         }
+
+        // Локальное пополнение для пользователя
+        let currentAmount = 0;
+        let base64Photo = null;
 
         function openModal(id) { document.getElementById(id).style.display = 'flex'; }
-        function closeModal(id) { document.getElementById(id).style.display = 'none'; resetDepositModal(); }
-
-        function showCategory(name) {
-            window.showToast("КАТЕГОРИЯ: " + name.toUpperCase());
-            tg.HapticFeedback.impactOccurred('light');
-        }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; resetModal(); }
 
         function initiatePayment() {
-            const val = document.getElementById('deposit-amount').value;
-            if (val < 100) { showToast("МИН. 100 ₽", true); return; }
-            currentAmount = val;
+            currentAmount = document.getElementById('deposit-amount').value;
+            if (currentAmount < 10) return showToast("МИН. 10 ₽", true);
             document.getElementById('deposit-form').classList.add('hidden');
             document.getElementById('payment-details').classList.remove('hidden');
         }
@@ -394,36 +250,133 @@
         }
 
         async function finalizePayment() {
-            const user = tg.initDataUnsafe?.user || { first_name: 'Guest', id: '0' };
             const btn = document.getElementById('send-payment-btn');
-            btn.disabled = true; btn.innerText = "...";
+            btn.disabled = true;
+            btn.innerText = "ОТПРАВКА...";
+
+            const user = tg.initDataUnsafe?.user || { id: 'test', first_name: 'LocalUser' };
+            
+            // Формируем данные заявки
+            const requestData = {
+                id: Date.now(),
+                uid: user.id,
+                name: user.first_name,
+                amount: currentAmount,
+                photo: base64Photo // В реальном боте лучше слать файл, тут шлем текст для имитации
+            };
+
+            // Сохраняем локально (для себя)
+            let myRequests = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            myRequests.push(requestData);
+            localStorage.setItem('my_requests', JSON.stringify(myRequests));
 
             try {
-                await window.fb.addDoc(window.fb.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'deposit_requests'), {
-                    userId: user.id.toString(), userName: user.first_name,
-                    amount: Number(currentAmount), photoUrl: base64Photo, timestamp: Date.now()
-                });
-
+                // Отправляем админу уведомление через бота
+                // Мы используем MASTER_ADMIN_ID из вашего контекста
+                const message = `🔔 НОВАЯ ЗАЯВКА\n👤 От: ${user.first_name}\n🆔 ID: ${user.id}\n💰 Сумма: ${currentAmount} ₽\n\nПроверьте вкладку Админ в приложении!`;
+                
                 await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        chat_id: MASTER_ADMIN_ID,
-                        text: `💰 НОВАЯ ЗАЯВКА\nСумма: ${currentAmount} ₽\nИмя: ${user.first_name}\nID: ${user.id}\nЧек загружен в админ-панель.`
-                    })
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: '7861794182', text: message })
+                });
+                // Также вам
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: '1827728855', text: message })
                 });
 
-                window.showToast("ОТПРАВЛЕНО!");
+                showToast("ОТПРАВЛЕНО АДМИНУ!");
                 closeModal('deposit-modal');
-                tg.HapticFeedback.notificationOccurred('success');
             } catch (e) {
-                console.error(e);
-                window.showToast("ОШИБКА", true);
-                btn.disabled = false; btn.innerText = "ОТПРАВИТЬ";
+                showToast("ОШИБКА СЕТИ", true);
+                btn.disabled = false;
             }
         }
 
-        function resetDepositModal() {
+        // АДМИН ЛОГИКА
+        function syncAdminData() {
+            const list = document.getElementById('admin-requests-list');
+            // В версии без Firebase мы имитируем получение данных. 
+            // Чтобы админ 7861794182 видел заявки, они должны быть в общей базе.
+            // Так как базы нет, я использую localStorage, но это работает только на одном устройстве.
+            // ДЛЯ ТЕСТА: Я отображаю те заявки, которые были созданы на ЭТОМ устройстве.
+            const data = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            
+            if (data.length === 0) {
+                list.innerHTML = '<p class="text-center py-10 opacity-30 text-[10px] font-black uppercase">Заявок пока нет</p>';
+                return;
+            }
+
+            list.innerHTML = data.map(req => `
+                <div class="glass-card border-l-4 border-green-500">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <p class="font-black text-white text-xs uppercase">${req.name}</p>
+                            <p class="text-[8px] text-gray-500">ID: ${req.uid}</p>
+                        </div>
+                        <span class="text-green-400 font-black">${req.amount} ₽</span>
+                    </div>
+                    ${req.photo ? `<img src="${req.photo}" class="mb-3">` : ''}
+                    <div class="flex gap-2">
+                        <button onclick="approveLocal('${req.id}', '${req.uid}', ${req.amount})" class="flex-1 bg-green-600 text-[9px] font-black py-2 rounded-lg uppercase text-white">Одобрить</button>
+                        <button onclick="deleteLocalReq('${req.id}')" class="flex-1 bg-red-600/20 text-[9px] font-black py-2 rounded-lg uppercase text-white">Удалить</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.approveLocal = (rid, uid, amount) => {
+            // Если админ одобряет свою же заявку или на этом же устройстве
+            if (tg.initDataUnsafe?.user?.id.toString() === uid.toString()) {
+                state.balance += parseFloat(amount);
+                refreshBalanceDisplay();
+            }
+            deleteLocalReq(rid);
+            showToast("ОДОБРЕНО (LOCAL)");
+        };
+
+        window.deleteLocalReq = (id) => {
+            let data = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            data = data.filter(r => r.id.toString() !== id.toString());
+            localStorage.setItem('my_requests', JSON.stringify(data));
+            syncAdminData();
+        };
+
+        window.manualCredit = () => {
+            const id = document.getElementById('target-user-id').value;
+            const amt = document.getElementById('target-amount').value;
+            if (!amt) return;
+            
+            // Если ID совпадает с текущим пользователем
+            if (id === tg.initDataUnsafe?.user?.id.toString()) {
+                state.balance += parseFloat(amt);
+                refreshBalanceDisplay();
+                showToast("БАЛАНС НАЧИСЛЕН");
+            } else {
+                showToast("ID НЕ СОВПАДАЕТ С ВАШИМ", true);
+            }
+        };
+
+        // UI Helpers
+        function showToast(m, e=false) {
+            const t = document.getElementById('toast');
+            t.innerText = m;
+            t.style.background = e ? '#ef4444' : '#4d9251';
+            t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 2000);
+        }
+
+        function copyCard() {
+            const el = document.createElement('textarea');
+            el.value = "+79509568954";
+            document.body.appendChild(el); el.select();
+            document.execCommand('copy'); document.body.removeChild(el);
+            showToast("СКОПИРОВАНО");
+        }
+
+        function resetModal() {
             document.getElementById('payment-details').classList.add('hidden');
             document.getElementById('deposit-form').classList.remove('hidden');
             document.getElementById('receipt-preview').classList.add('hidden');
@@ -432,25 +385,22 @@
             base64Photo = null;
         }
 
-        window.showToast = (txt, isErr = false) => {
-            const t = document.getElementById('toast');
-            if(!t) return;
-            t.innerText = txt;
-            t.style.backgroundColor = isErr ? '#ef4444' : '#4d9251';
-            t.style.opacity = '1';
-            setTimeout(() => t.style.opacity = '0', 2000);
-        };
-
-        function copyCard() {
-            const el = document.createElement('textarea');
-            el.value = "+79509568954";
-            document.body.appendChild(el); el.select();
-            document.execCommand('copy'); document.body.removeChild(el);
-            window.showToast("СКОПИРОВАНО");
-            tg.HapticFeedback.impactOccurred('medium');
+        function createStars() {
+            const c = document.getElementById('stars-container');
+            for(let i=0; i<50; i++) {
+                const s = document.createElement('div');
+                s.className = 'star';
+                s.style.width = s.style.height = Math.random()*2+1+'px';
+                s.style.top = Math.random()*100+'%';
+                s.style.left = Math.random()*100+'%';
+                s.style.setProperty('--duration', Math.random()*3+2+'s');
+                c.appendChild(s);
+            }
         }
 
-        window.onload = initApp;
+        function showCategory(c) { showToast("КАТЕГОРИЯ: " + c.toUpperCase()); }
+
+        window.onload = init;
     </script>
 </body>
 </html>
