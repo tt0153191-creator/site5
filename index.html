@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Schem Shop - Admin Sync</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <style>
+        :root { --primary: #4d9251; --primary-dark: #356b38; --bg-dark: #0a0a0a; --card-bg: rgba(22, 22, 22, 0.95); }
+        body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; background-color: var(--bg-dark); color: white; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+        
+        .stars-background {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%);
+            z-index: -2; overflow: hidden;
+        }
+
+        .star {
+            position: absolute; background: white; border-radius: 50%;
+            opacity: 0.3; animation: twinkle var(--duration) infinite ease-in-out;
+        }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.3; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.2); }
+        }
+
+        .background-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: url('https://imgfy.ru/ib/28ZaeBOokCuv9RQ_1771497791.jpg'); background-size: cover; background-position: center; filter: blur(40px); opacity: 0.4; z-index: -1; }
+        
+        .container-wrapper { max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; padding: 20px 16px 140px 16px; position: relative; }
+        .glass-card { background-color: var(--card-bg); backdrop-filter: blur(20px); border-radius: 28px; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.05); }
+        
+        .hero-banner { width: 100%; height: 160px; border-radius: 30px; position: relative; overflow: hidden; display: flex; align-items: flex-end; border: 1px solid rgba(255,255,255,0.08); background: #000; }
+        .hero-banner .banner-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.7; filter: grayscale(0.5); }
+        .hero-banner .banner-content { position: relative; z-index: 10; padding: 20px; width: 100%; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); }
+
+        .bottom-nav { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; background: rgba(15, 15, 15, 0.98); backdrop-filter: blur(30px); border-radius: 35px; display: flex; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.08); z-index: 100; box-shadow: 0 15px 50px rgba(0,0,0,0.8); }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; color: #555; font-size: 0.55rem; cursor: pointer; transition: 0.2s; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; }
+        .nav-item.active { color: var(--primary); }
+        .nav-item span:first-child { font-size: 1.2rem; margin-bottom: 4px; filter: grayscale(1); opacity: 0.5; }
+        .nav-item.active span:first-child { filter: grayscale(0); opacity: 1; }
+
+        .tab-content { display: none; flex-direction: column; gap: 16px; animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .tab-content.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+
+        .btn-main { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; border-radius: 22px; padding: 20px; font-weight: 900; display: flex; align-items: center; justify-content: center; width: 100%; border: none; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.75rem; box-shadow: 0 10px 30px rgba(77, 146, 81, 0.25); transition: 0.3s; }
+        .btn-main:active { transform: scale(0.96); filter: brightness(1.1); }
+        .btn-main:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.96); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px; backdrop-filter: blur(20px); }
+        
+        .admin-subtab { display: none; }
+        .admin-subtab.active { display: block; }
+        .subtab-btn { flex: 1; padding: 10px; text-align: center; font-size: 10px; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; color: #444; border-bottom: 2px solid transparent; }
+        .subtab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+
+        #admin-requests-list img { max-height: 200px; width: 100%; object-fit: contain; background: #000; border-radius: 12px; }
+    </style>
+</head>
+<body>
+
+    <div class="stars-background" id="stars-container"></div>
+    <div class="background-overlay"></div>
+    <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 bg-[#4d9251] px-10 py-5 rounded-3xl z-[2000] opacity-0 transition-all pointer-events-none text-[10px] font-black uppercase shadow-2xl text-center tracking-widest border border-white/10"></div>
+
+    <div class="container-wrapper">
+        
+        <!-- HOME -->
+        <div id="home-tab" class="tab-content active">
+            <div class="hero-banner">
+                <img src="https://imgfy.ru/ib/HqoMAyXqRBc9QEn_1771516584.jpg" class="banner-img">
+                <div class="banner-content">
+                    <h1 class="text-3xl font-black italic tracking-tighter leading-none text-white">SCHEM SHOP</h1>
+                </div>
+            </div>
+            <div class="glass-card">
+                <h2 class="text-xl font-black mb-2 italic uppercase">Привет 👋</h2>
+                <p class="text-gray-500 text-xs font-bold uppercase tracking-tight">Добро пожаловать в приватный магазин.</p>
+            </div>
+            <button class="btn-main mt-4" onclick="switchTab('catalog')">В каталог ➔</button>
+        </div>
+
+        <!-- CATALOG -->
+        <div id="catalog-tab" class="tab-content">
+            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase text-white">КАТАЛОГ</h2>
+            <div class="grid grid-cols-1 gap-3">
+                <div class="glass-card flex justify-between items-center py-6" onclick="showCategory('Схемы')">
+                    <span class="font-black italic uppercase">Схемы</span>
+                    <span class="text-xl">💎</span>
+                </div>
+                <div class="glass-card flex justify-between items-center py-6" onclick="showCategory('Абузы')">
+                    <span class="font-black italic uppercase">Абузы</span>
+                    <span class="text-xl">🔥</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- PROFILE -->
+        <div id="profile-tab" class="tab-content">
+            <div class="glass-card text-center">
+                <img id="user-photo" src="https://ui-avatars.com/api/?background=222" class="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-white/5">
+                <h2 id="user-display-name" class="font-black italic uppercase text-white">...</h2>
+                <div class="mt-6 p-6 bg-black/40 rounded-3xl">
+                    <p class="text-[9px] text-gray-500 uppercase font-black mb-1">Ваш Баланс</p>
+                    <div id="balance-display" class="text-3xl font-black text-green-400">0.00 ₽</div>
+                </div>
+            </div>
+            <button class="btn-main mt-4" onclick="openModal('deposit-modal')">💳 Пополнить</button>
+        </div>
+
+        <!-- ADMIN -->
+        <div id="admin-tab" class="tab-content">
+            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase text-white">АДМИН-ЦЕНТР</h2>
+            <div class="flex gap-4 mb-6 border-b border-white/5">
+                <div class="subtab-btn active" id="btn-sub-req" onclick="switchAdminSubTab('req')">Заявки</div>
+                <div class="subtab-btn" id="btn-sub-settings" onclick="switchAdminSubTab('settings')">Настройки</div>
+            </div>
+            
+            <div id="sub-req" class="admin-subtab active">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-[10px] font-black uppercase text-gray-500">Актуальные запросы</span>
+                    <button onclick="syncAdminData()" class="text-[10px] text-blue-400 font-black uppercase">Обновить 🔄</button>
+                </div>
+                <div id="admin-requests-list" class="space-y-4">
+                    <!-- Заявки будут здесь -->
+                </div>
+            </div>
+
+            <div id="sub-settings" class="admin-subtab">
+                <div class="glass-card">
+                    <p class="text-[10px] font-black uppercase text-gray-500 mb-4">Управление балансом (Local)</p>
+                    <input type="text" id="target-user-id" placeholder="ID Пользователя" class="w-full bg-black/50 border border-white/10 p-4 rounded-xl mb-2 text-sm">
+                    <input type="number" id="target-amount" placeholder="Сумма" class="w-full bg-black/50 border border-white/10 p-4 rounded-xl mb-4 text-sm">
+                    <button class="btn-main py-4" onclick="manualCredit()">Начислить баланс</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DEPOSIT MODAL -->
+    <div id="deposit-modal" class="modal">
+        <div class="glass-card w-full max-w-[360px]" id="deposit-form">
+            <h2 class="text-xl font-black mb-6 text-center uppercase">Сумма (₽)</h2>
+            <input type="number" id="deposit-amount" class="w-full bg-black/60 border border-white/5 rounded-2xl p-6 text-center text-4xl font-black text-green-400 outline-none" value="500">
+            <button class="btn-main mt-6" onclick="initiatePayment()">Далее</button>
+            <button class="text-[9px] font-black w-full mt-4 text-gray-600 uppercase" onclick="closeModal('deposit-modal')">Закрыть</button>
+        </div>
+
+        <div class="glass-card w-full max-w-[360px] text-center hidden" id="payment-details">
+            <p class="text-[9px] text-gray-500 uppercase font-black mb-4">Перевод OZON</p>
+            <div class="bg-black/70 p-6 rounded-3xl mb-6 border border-white/5" onclick="copyCard()">
+                <p class="text-xl font-mono font-black text-green-400">+79509568954</p>
+                <p class="text-[8px] mt-2 text-blue-400 uppercase font-black">Нажмите для копирования</p>
+            </div>
+            <input type="file" id="receipt-file" class="hidden" accept="image/*" onchange="previewImage(this)">
+            <div class="w-full h-32 border-2 border-dashed border-white/10 rounded-3xl flex items-center justify-center cursor-pointer mb-6 overflow-hidden bg-black/60" onclick="document.getElementById('receipt-file').click()">
+                <div id="upload-placeholder" class="text-[9px] text-gray-500 font-black uppercase">Скриншот чека</div>
+                <img id="receipt-preview" class="w-full h-full object-cover hidden">
+            </div>
+            <button class="btn-main" id="send-payment-btn" onclick="finalizePayment()" disabled>Отправить</button>
+        </div>
+    </div>
+
+    <!-- NAV -->
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span>🏠</span>Главная</div>
+        <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')"><span>💎</span>Маркет</div>
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile')"><span>⚙️</span>Профиль</div>
+        <div class="nav-item hidden" id="nav-admin" onclick="switchTab('admin')"><span>🛠️</span>Админ</div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        const BOT_TOKEN = '7909769159:AAGPXQEYG2LCki54CSI09p2I2_E5w8Lh4D8';
+        const ADMIN_IDS = ['1827728855', '7861794182']; // Ваши ID
+        
+        let state = {
+            balance: parseFloat(localStorage.getItem('user_balance') || '0'),
+            pendingRequests: JSON.parse(localStorage.getItem('admin_requests') || '[]')
+        };
+
+        function init() {
+            tg.expand();
+            tg.ready();
+            createStars();
+            
+            const user = tg.initDataUnsafe?.user;
+            if (user) {
+                document.getElementById('user-display-name').innerText = user.first_name.toUpperCase();
+                if (user.photo_url) document.getElementById('user-photo').src = user.photo_url;
+                
+                // Проверка на админа
+                if (ADMIN_IDS.includes(user.id.toString())) {
+                    document.getElementById('nav-admin').classList.remove('hidden');
+                }
+            }
+            refreshBalanceDisplay();
+        }
+
+        function refreshBalanceDisplay() {
+            document.getElementById('balance-display').innerText = state.balance.toFixed(2) + ' ₽';
+            localStorage.setItem('user_balance', state.balance);
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById(name + '-tab').classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.getElementById('nav-' + name).classList.add('active');
+            tg.HapticFeedback.impactOccurred('medium');
+            if(name === 'admin') syncAdminData();
+        }
+
+        function switchAdminSubTab(name) {
+            document.querySelectorAll('.admin-subtab').forEach(t => t.classList.remove('active'));
+            document.getElementById('sub-' + name).classList.add('active');
+            document.querySelectorAll('.subtab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('btn-sub-' + name).classList.add('active');
+        }
+
+        // Локальное пополнение для пользователя
+        let currentAmount = 0;
+        let base64Photo = null;
+
+        function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+        function closeModal(id) { document.getElementById(id).style.display = 'none'; resetModal(); }
+
+        function initiatePayment() {
+            currentAmount = document.getElementById('deposit-amount').value;
+            if (currentAmount < 10) return showToast("МИН. 10 ₽", true);
+            document.getElementById('deposit-form').classList.add('hidden');
+            document.getElementById('payment-details').classList.remove('hidden');
+        }
+
+        function previewImage(input) {
+            if (input.files && input.files[0]) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    base64Photo = e.target.result;
+                    document.getElementById('receipt-preview').src = base64Photo;
+                    document.getElementById('receipt-preview').classList.remove('hidden');
+                    document.getElementById('upload-placeholder').classList.add('hidden');
+                    document.getElementById('send-payment-btn').disabled = false;
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        async function finalizePayment() {
+            const btn = document.getElementById('send-payment-btn');
+            btn.disabled = true;
+            btn.innerText = "ОТПРАВКА...";
+
+            const user = tg.initDataUnsafe?.user || { id: 'test', first_name: 'LocalUser' };
+            
+            // Формируем данные заявки
+            const requestData = {
+                id: Date.now(),
+                uid: user.id,
+                name: user.first_name,
+                amount: currentAmount,
+                photo: base64Photo // В реальном боте лучше слать файл, тут шлем текст для имитации
+            };
+
+            // Сохраняем локально (для себя)
+            let myRequests = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            myRequests.push(requestData);
+            localStorage.setItem('my_requests', JSON.stringify(myRequests));
+
+            try {
+                // Отправляем админу уведомление через бота
+                // Мы используем MASTER_ADMIN_ID из вашего контекста
+                const message = `🔔 НОВАЯ ЗАЯВКА\n👤 От: ${user.first_name}\n🆔 ID: ${user.id}\n💰 Сумма: ${currentAmount} ₽\n\nПроверьте вкладку Админ в приложении!`;
+                
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: '7861794182', text: message })
+                });
+                // Также вам
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ chat_id: '1827728855', text: message })
+                });
+
+                showToast("ОТПРАВЛЕНО АДМИНУ!");
+                closeModal('deposit-modal');
+            } catch (e) {
+                showToast("ОШИБКА СЕТИ", true);
+                btn.disabled = false;
+            }
+        }
+
+        // АДМИН ЛОГИКА
+        function syncAdminData() {
+            const list = document.getElementById('admin-requests-list');
+            // В версии без Firebase мы имитируем получение данных. 
+            // Чтобы админ 7861794182 видел заявки, они должны быть в общей базе.
+            // Так как базы нет, я использую localStorage, но это работает только на одном устройстве.
+            // ДЛЯ ТЕСТА: Я отображаю те заявки, которые были созданы на ЭТОМ устройстве.
+            const data = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            
+            if (data.length === 0) {
+                list.innerHTML = '<p class="text-center py-10 opacity-30 text-[10px] font-black uppercase">Заявок пока нет</p>';
+                return;
+            }
+
+            list.innerHTML = data.map(req => `
+                <div class="glass-card border-l-4 border-green-500">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <p class="font-black text-white text-xs uppercase">${req.name}</p>
+                            <p class="text-[8px] text-gray-500">ID: ${req.uid}</p>
+                        </div>
+                        <span class="text-green-400 font-black">${req.amount} ₽</span>
+                    </div>
+                    ${req.photo ? `<img src="${req.photo}" class="mb-3">` : ''}
+                    <div class="flex gap-2">
+                        <button onclick="approveLocal('${req.id}', '${req.uid}', ${req.amount})" class="flex-1 bg-green-600 text-[9px] font-black py-2 rounded-lg uppercase text-white">Одобрить</button>
+                        <button onclick="deleteLocalReq('${req.id}')" class="flex-1 bg-red-600/20 text-[9px] font-black py-2 rounded-lg uppercase text-white">Удалить</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        window.approveLocal = (rid, uid, amount) => {
+            // Если админ одобряет свою же заявку или на этом же устройстве
+            if (tg.initDataUnsafe?.user?.id.toString() === uid.toString()) {
+                state.balance += parseFloat(amount);
+                refreshBalanceDisplay();
+            }
+            deleteLocalReq(rid);
+            showToast("ОДОБРЕНО (LOCAL)");
+        };
+
+        window.deleteLocalReq = (id) => {
+            let data = JSON.parse(localStorage.getItem('my_requests') || '[]');
+            data = data.filter(r => r.id.toString() !== id.toString());
+            localStorage.setItem('my_requests', JSON.stringify(data));
+            syncAdminData();
+        };
+
+        window.manualCredit = () => {
+            const id = document.getElementById('target-user-id').value;
+            const amt = document.getElementById('target-amount').value;
+            if (!amt) return;
+            
+            // Если ID совпадает с текущим пользователем
+            if (id === tg.initDataUnsafe?.user?.id.toString()) {
+                state.balance += parseFloat(amt);
+                refreshBalanceDisplay();
+                showToast("БАЛАНС НАЧИСЛЕН");
+            } else {
+                showToast("ID НЕ СОВПАДАЕТ С ВАШИМ", true);
+            }
+        };
+
+        // UI Helpers
+        function showToast(m, e=false) {
+            const t = document.getElementById('toast');
+            t.innerText = m;
+            t.style.background = e ? '#ef4444' : '#4d9251';
+            t.style.opacity = 1;
+            setTimeout(() => t.style.opacity = 0, 2000);
+        }
+
+        function copyCard() {
+            const el = document.createElement('textarea');
+            el.value = "+79509568954";
+            document.body.appendChild(el); el.select();
+            document.execCommand('copy'); document.body.removeChild(el);
+            showToast("СКОПИРОВАНО");
+        }
+
+        function resetModal() {
+            document.getElementById('payment-details').classList.add('hidden');
+            document.getElementById('deposit-form').classList.remove('hidden');
+            document.getElementById('receipt-preview').classList.add('hidden');
+            document.getElementById('upload-placeholder').classList.remove('hidden');
+            document.getElementById('send-payment-btn').disabled = true;
+            base64Photo = null;
+        }
+
+        function createStars() {
+            const c = document.getElementById('stars-container');
+            for(let i=0; i<50; i++) {
+                const s = document.createElement('div');
+                s.className = 'star';
+                s.style.width = s.style.height = Math.random()*2+1+'px';
+                s.style.top = Math.random()*100+'%';
+                s.style.left = Math.random()*100+'%';
+                s.style.setProperty('--duration', Math.random()*3+2+'s');
+                c.appendChild(s);
+            }
+        }
+
+        function showCategory(c) { showToast("КАТЕГОРИЯ: " + c.toUpperCase()); }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
