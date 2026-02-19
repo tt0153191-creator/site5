@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="no-referrer">
+    <title>Schem Shop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'digital-store-v2';
+
+        window.db = db;
+        window.appId = appId;
+        window.fb = { doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query };
+
+        // Список администраторов
+        const ADMIN_IDS = ['1827728855', '7861794182'];
+
+        async function startAuth() {
+            // 1. Сначала авторизация
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+
+            // 2. Слушаем состояние входа
+            onAuthStateChanged(auth, (user) => {
+                if (!user) return;
+
+                const tgUser = window.Telegram.WebApp.initDataUnsafe?.user;
+                const userId = tgUser ? tgUser.id.toString() : '0'; 
+                
+                // Проверка прав администратора
+                if (ADMIN_IDS.includes(userId)) {
+                    window.isAdmin = true;
+                    const adminBtn = document.getElementById('nav-admin');
+                    if (adminBtn) adminBtn.classList.remove('hidden');
+                    loadAdminRequests();
+                }
+
+                // Синхронизация данных пользователя
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+                onSnapshot(userRef, (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.data();
+                        const balance = Number(data.balance) || 0;
+                        document.getElementById('balance-display').innerText = `${balance.toFixed(2)} ₽`;
+                        window.currentBalance = balance;
+                    } else if (userId !== '0') {
+                        setDoc(userRef, { 
+                            balance: 0, 
+                            name: tgUser?.first_name || 'User', 
+                            username: tgUser?.username || '',
+                            userId: userId 
+                        });
+                    }
+                }, (err) => console.error("Firestore error:", err));
+            });
+        }
+
+        function loadAdminRequests() {
+            const reqRef = collection(db, 'artifacts', appId, 'public', 'data', 'deposit_requests');
+            onSnapshot(reqRef, (snap) => {
+                const container = document.getElementById('admin-requests-list');
+                if (!container) return;
+                
+                if (snap.empty) {
+                    container.innerHTML = `
+                        <div class="flex flex-col items-center justify-center py-20 opacity-30">
+                            <span class="text-6xl mb-4">💤</span>
+                            <p class="text-xs font-black uppercase tracking-widest">Заявок пока нет</p>
+                        </div>
+                    `;
+                    return;
+                }
+                container.innerHTML = '';
+                snap.forEach(d => {
+                    const req = d.data();
+                    const div = document.createElement('div');
+                    div.className = 'glass-card flex flex-col gap-4 border-green-500/10 mb-4 overflow-hidden relative';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="font-black text-white text-sm uppercase italic">${req.userName || 'Клиент'}</p>
+                                <p class="text-[9px] text-gray-500 font-bold tracking-tighter">ID: ${req.userId}</p>
+                            </div>
+                            <div class="text-right">
+                                <span class="text-green-400 font-black text-xl">${req.amount} ₽</span>
+                            </div>
+                        </div>
+                        
+                        ${req.photoUrl ? `
+                        <div class="relative group">
+                            <img src="${req.photoUrl}" class="w-full h-48 object-cover rounded-2xl bg-black/40 border border-white/5 cursor-pointer" onclick="window.open('${req.photoUrl}')">
+                        </div>` : ''}
+                        
+                        <div class="flex gap-2">
+                            <button class="flex-1 bg-green-600 hover:bg-green-500 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all" onclick="approveRequest('${d.id}', '${req.userId}', ${req.amount})">Принять</button>
+                            <button class="flex-1 bg-red-600/20 hover:bg-red-600/30 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest active:scale-95 transition-all border border-red-500/20" onclick="rejectRequest('${d.id}')">Отклонить</button>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                });
+            }, (err) => {
+                console.error("Admin listener error:", err);
+            });
+        }
+
+        window.approveRequest = async (docId, uid, amount) => {
+            try {
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', String(uid));
+                const userSnap = await getDoc(userRef);
+                if (userSnap.exists()) {
+                    await updateDoc(userRef, { balance: Number(userSnap.data().balance || 0) + Number(amount) });
+                }
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deposit_requests', docId));
+                window.showToast("БАЛАНС ПОПОЛНЕН!");
+                window.Telegram.WebApp.HapticFeedback.notificationOccurred('success');
+            } catch (e) { window.showToast("ОШИБКА ПРИЕМКИ", true); }
+        };
+
+        window.rejectRequest = async (docId) => {
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deposit_requests', docId));
+                window.showToast("ЗАЯВКА ОТКЛОНЕНА", true);
+                window.Telegram.WebApp.HapticFeedback.notificationOccurred('warning');
+            } catch (e) { window.showToast("ОШИБКА УДАЛЕНИЯ", true); }
+        };
+
+        startAuth();
+    </script>
+
+    <style>
+        :root { --primary: #4d9251; --primary-dark: #356b38; --bg-dark: #0a0a0a; --card-bg: rgba(22, 22, 22, 0.98); }
+        body { margin: 0; padding: 0; font-family: -apple-system, system-ui, sans-serif; background-color: var(--bg-dark); color: white; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
+        
+        .background-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-image: url('https://imgfy.ru/ib/28ZaeBOokCuv9RQ_1771497791.jpg'); background-size: cover; background-position: center; filter: blur(20px); transform: scale(1.1); z-index: -1; }
+        .background-overlay::after { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.92); }
+        
+        .container-wrapper { max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; padding: 20px 16px 140px 16px; position: relative; }
+        .glass-card { background-color: var(--card-bg); backdrop-filter: blur(20px); border-radius: 28px; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.05); }
+        
+        .hero-banner { width: 100%; height: 160px; border-radius: 30px; position: relative; overflow: hidden; display: flex; align-items: flex-end; border: 1px solid rgba(255,255,255,0.08); background: #000; }
+        .hero-banner .banner-img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.7; filter: grayscale(0.5); }
+        .hero-banner .banner-content { position: relative; z-index: 10; padding: 20px; width: 100%; background: linear-gradient(to top, rgba(0,0,0,0.9), transparent); }
+
+        .bottom-nav { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; background: rgba(15, 15, 15, 0.98); backdrop-filter: blur(30px); border-radius: 35px; display: flex; padding: 12px; border: 1px solid rgba(255, 255, 255, 0.08); z-index: 100; box-shadow: 0 15px 50px rgba(0,0,0,0.8); }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; color: #555; font-size: 0.55rem; cursor: pointer; transition: 0.2s; font-weight: 900; text-transform: uppercase; letter-spacing: 0.8px; }
+        .nav-item.active { color: var(--primary); }
+        .nav-item span:first-child { font-size: 1.2rem; margin-bottom: 4px; filter: grayscale(1); opacity: 0.5; }
+        .nav-item.active span:first-child { filter: grayscale(0); opacity: 1; }
+
+        .tab-content { display: none; flex-direction: column; gap: 16px; animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .tab-content.active { display: flex; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+
+        .btn-main { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%); color: white; border-radius: 22px; padding: 20px; font-weight: 900; display: flex; align-items: center; justify-content: center; width: 100%; border: none; text-transform: uppercase; letter-spacing: 1.5px; font-size: 0.75rem; box-shadow: 0 10px 30px rgba(77, 146, 81, 0.25); transition: 0.3s; }
+        .btn-main:active { transform: scale(0.96); filter: brightness(1.1); }
+
+        .category-item { background: rgba(30, 30, 30, 0.4); border-radius: 24px; padding: 24px; border: 1px solid rgba(255,255,255,0.03); display: flex; align-items: center; justify-content: space-between; transition: 0.2s; }
+        .category-item:active { background: rgba(60, 60, 60, 0.6); border-color: var(--primary); transform: translateX(5px); }
+        .category-name { font-size: 0.95rem; font-weight: 900; text-transform: uppercase; letter-spacing: 1px; font-style: italic; }
+        .category-icon { background: rgba(255,255,255,0.05); width: 48px; height: 48px; border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; border: 1px solid rgba(255,255,255,0.02); }
+
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.96); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px; backdrop-filter: blur(20px); }
+    </style>
+</head>
+<body>
+
+    <div class="background-overlay"></div>
+    <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 bg-[#4d9251] px-10 py-5 rounded-3xl z-[2000] opacity-0 transition-all pointer-events-none text-[10px] font-black uppercase shadow-2xl text-center tracking-widest border border-white/10"></div>
+
+    <div class="container-wrapper">
+        
+        <!-- ГЛАВНАЯ -->
+        <div id="home-tab" class="tab-content active">
+            <div class="hero-banner">
+                <img src="https://imgfy.ru/ib/HqoMAyXqRBc9QEn_1771516584.jpg" class="banner-img" alt="Schem Shop">
+                <div class="banner-content">
+                    <h1 class="text-3xl font-black italic tracking-tighter leading-none">SCHEM SHOP</h1>
+                    <p class="text-[10px] text-green-400 font-black mt-2 uppercase tracking-[4px]">Digital Underground</p>
+                </div>
+            </div>
+
+            <div class="glass-card">
+                <h2 class="text-xl font-black mb-2 italic uppercase">Привет 👋</h2>
+                <p class="text-gray-500 text-xs leading-relaxed font-bold uppercase tracking-tight opacity-80">Добро пожаловать в приватный магазин. Выбирай категорию и начинай работу.</p>
+            </div>
+            <button class="btn-main mt-4" onclick="switchTab('catalog')">В каталог ➔</button>
+        </div>
+
+        <!-- МАГАЗИН -->
+        <div id="catalog-tab" class="tab-content">
+            <h2 class="text-2xl font-black italic mb-4 tracking-tighter uppercase">КАТАЛОГ</h2>
+            
+            <div class="flex flex-col gap-3">
+                <div class="category-item" onclick="showCategory('Схемы')">
+                    <div class="category-name">СХЕМЫ</div>
+                    <div class="category-icon">💎</div>
+                </div>
+                
+                <div class="category-item" onclick="showCategory('Абузы')">
+                    <div class="category-name">АБУЗЫ</div>
+                    <div class="category-icon">🔥</div>
+                </div>
+                
+                <div class="category-item" onclick="showCategory('Мануалы')">
+                    <div class="category-name">МАНУАЛЫ</div>
+                    <div class="category-icon">📚</div>
+                </div>
+                
+                <div class="category-item" onclick="showCategory('Софты')">
+                    <div class="category-name">СОФТЫ</div>
+                    <div class="category-icon">⚙️</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ПРОФИЛЬ -->
+        <div id="profile-tab" class="tab-content">
+            <div class="glass-card text-center relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-full h-1 bg-green-500/30"></div>
+                <img id="user-photo" src="https://ui-avatars.com/api/?background=222&color=4d9251&bold=true" class="w-28 h-28 rounded-[35px] mx-auto mb-6 border-2 border-white/5 p-1 object-cover shadow-2xl">
+                
+                <h2 class="text-2xl font-black italic leading-tight uppercase tracking-tighter" id="user-display-name">...</h2>
+                <p class="text-green-500 text-[11px] font-black uppercase tracking-[3px] mt-2 opacity-90" id="user-username">@username</p>
+                <p class="text-gray-700 text-[9px] font-black mt-2 uppercase tracking-widest" id="user-tg-id">ID: 00000000</p>
+
+                <div class="mt-10 p-8 bg-black/50 rounded-[35px] border border-white/5 shadow-inner">
+                    <span class="text-[10px] text-gray-500 uppercase font-black tracking-[4px]">Баланс счета</span>
+                    <div id="balance-display" class="text-green-400 font-black text-5xl mt-2 tracking-tighter italic">0.00 ₽</div>
+                </div>
+            </div>
+            <button class="btn-main mt-4" onclick="openModal('deposit-modal')">💳 Пополнить баланс</button>
+        </div>
+
+        <!-- АДМИН-ПАНЕЛЬ -->
+        <div id="admin-tab" class="tab-content">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-2xl font-black italic tracking-tighter uppercase">АДМИН-ЦЕНТР</h2>
+                <span class="bg-green-500/10 text-green-500 text-[10px] px-3 py-1 rounded-full font-black uppercase tracking-widest border border-green-500/20">Live</span>
+            </div>
+            <div id="admin-requests-list" class="flex flex-col"></div>
+        </div>
+    </div>
+
+    <!-- МОДАЛКА ПОПОЛНЕНИЯ -->
+    <div id="deposit-modal" class="modal">
+        <div class="glass-card w-full max-w-[360px]" id="deposit-form">
+            <h2 class="text-xl font-black mb-8 text-center uppercase italic tracking-widest">Введите сумму</h2>
+            <div class="relative mb-10">
+                <input type="number" id="deposit-amount" class="w-full bg-black/60 border border-white/5 rounded-[30px] p-8 text-center text-5xl font-black outline-none text-green-400 shadow-inner" value="500">
+                <span class="absolute bottom-[-25px] left-1/2 -translate-x-1/2 text-[9px] font-black text-gray-600 uppercase tracking-widest">Минимум 100 ₽</span>
+            </div>
+            <button class="btn-main" onclick="initiatePayment()">Продолжить</button>
+            <button class="text-gray-700 text-[10px] font-black w-full text-center mt-8 uppercase tracking-[3px] hover:text-white transition-colors" onclick="closeModal('deposit-modal')">Отмена</button>
+        </div>
+
+        <div class="glass-card w-full max-w-[360px] text-center hidden" id="payment-details">
+            <h2 class="text-xl font-black mb-2 uppercase italic tracking-tighter">Оплата OZON</h2>
+            <p class="text-gray-500 text-[9px] mb-8 uppercase font-black tracking-widest opacity-60">Перевод по номеру телефона</p>
+            
+            <div class="bg-black/70 p-8 rounded-[35px] mb-8 border border-white/5 shadow-inner group active:scale-95 transition-transform" onclick="copyCard()">
+                <p class="text-2xl font-mono font-black tracking-widest text-green-400">+79509568954</p>
+                <p class="text-blue-400 text-[9px] mt-4 uppercase font-black tracking-[3px] animate-pulse">Нажмите, чтобы скопировать</p>
+            </div>
+            
+            <input type="file" id="receipt-file" class="hidden" accept="image/*" onchange="previewImage(this)">
+            <div class="w-full h-40 border-2 border-dashed border-white/10 rounded-[35px] flex items-center justify-center cursor-pointer mb-8 overflow-hidden bg-black/60 hover:border-green-500/30 transition-colors shadow-inner" onclick="document.getElementById('receipt-file').click()">
+                <div id="upload-placeholder" class="text-[10px] text-gray-500 font-black uppercase tracking-widest px-10">Загрузите скриншот чека</div>
+                <img id="receipt-preview" class="w-full h-full object-cover hidden">
+            </div>
+
+            <button class="btn-main" id="send-payment-btn" onclick="finalizePayment()" disabled>Отправить на проверку</button>
+            <button class="text-gray-700 text-[10px] font-black mt-8 uppercase tracking-[3px]" onclick="resetDepositModal()">Назад</button>
+        </div>
+    </div>
+
+    <!-- МЕНЮ -->
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')"><span>🏠</span>Главная</div>
+        <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')"><span>💎</span>Маркет</div>
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile')"><span>⚙️</span>Профиль</div>
+        <div class="nav-item hidden" id="nav-admin" onclick="switchTab('admin')"><span>🛠️</span>Админ</div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        const BOT_TOKEN = '7909769159:AAGPXQEYG2LCki54CSI09p2I2_E5w8Lh4D8';
+        const MASTER_ADMIN_ID = '1827728855';
+
+        let currentAmount = 0;
+        let selectedFile = null;
+        let base64Photo = null;
+
+        function initApp() {
+            tg.expand();
+            tg.ready();
+            const user = tg.initDataUnsafe?.user;
+            
+            if (user) {
+                document.getElementById('user-display-name').innerText = (user.first_name + (user.last_name ? ' ' + user.last_name : '')).toUpperCase();
+                document.getElementById('user-username').innerText = user.username ? '@' + user.username.toUpperCase() : '';
+                document.getElementById('user-tg-id').innerText = 'ID: ' + user.id;
+                
+                if (user.photo_url) {
+                    document.getElementById('user-photo').src = user.photo_url;
+                }
+
+                // Принудительная проверка ID для немедленного отображения кнопки
+                const ADMIN_IDS = ['1827728855', '7861794182'];
+                if (ADMIN_IDS.includes(user.id.toString())) {
+                    document.getElementById('nav-admin').classList.remove('hidden');
+                }
+            }
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.getElementById(name + '-tab').classList.add('active');
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+            document.getElementById('nav-' + name).classList.add('active');
+            tg.HapticFeedback.impactOccurred('medium');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function showCategory(name) {
+            showToast("КАТЕГОРИЯ: " + name.toUpperCase());
+            tg.HapticFeedback.impactOccurred('light');
+        }
+
+        function openModal(id) { 
+            const el = document.getElementById(id);
+            el.style.display = 'flex';
+        }
+        
+        function closeModal(id) { 
+            const el = document.getElementById(id);
+            el.style.display = 'none';
+            resetDepositModal();
+        }
+
+        function initiatePayment() {
+            const val = document.getElementById('deposit-amount').value;
+            if (val < 100) { showToast("МИНИМУМ 100 ₽", true); return; }
+            currentAmount = parseFloat(val);
+            document.getElementById('deposit-form').classList.add('hidden');
+            document.getElementById('payment-details').classList.remove('hidden');
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        function previewImage(input) {
+            if (input.files && input.files[0]) {
+                selectedFile = input.files[0];
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    base64Photo = e.target.result;
+                    const img = document.getElementById('receipt-preview');
+                    img.src = base64Photo;
+                    img.classList.remove('hidden');
+                    document.getElementById('upload-placeholder').classList.add('hidden');
+                    document.getElementById('send-payment-btn').disabled = false;
+                };
+                reader.readAsDataURL(input.files[0]);
+            }
+        }
+
+        async function finalizePayment() {
+            const user = tg.initDataUnsafe?.user || { first_name: 'Unknown', id: '0' };
+            const btn = document.getElementById('send-payment-btn');
+            btn.disabled = true; btn.innerText = "ОТПРАВКА...";
+
+            try {
+                await window.fb.addDoc(window.fb.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'deposit_requests'), {
+                    userId: user.id.toString(), userName: user.first_name,
+                    amount: Number(currentAmount), photoUrl: base64Photo, timestamp: Date.now()
+                });
+
+                const formData = new FormData();
+                formData.append('chat_id', MASTER_ADMIN_ID);
+                formData.append('photo', selectedFile);
+                formData.append('caption', `💰 НОВАЯ ЗАЯВКА: ${currentAmount} ₽\n👤 Имя: ${user.first_name}\n🆔 ID: ${user.id}`);
+                await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`, { method: 'POST', body: formData });
+
+                window.showToast("ЗАЯВКА ОТПРАВЛЕНА!");
+                closeModal('deposit-modal');
+                tg.HapticFeedback.notificationOccurred('success');
+            } catch (e) {
+                window.showToast("ОШИБКА ОТПРАВКИ", true);
+                btn.disabled = false; btn.innerText = "ПОДТВЕРДИТЬ";
+            }
+        }
+
+        function resetDepositModal() {
+            document.getElementById('payment-details').classList.add('hidden');
+            document.getElementById('deposit-form').classList.remove('hidden');
+            const img = document.getElementById('receipt-preview');
+            img.classList.add('hidden');
+            document.getElementById('upload-placeholder').classList.remove('hidden');
+            document.getElementById('send-payment-btn').disabled = true;
+            selectedFile = null; base64Photo = null;
+        }
+
+        window.showToast = (txt, isErr = false) => {
+            const t = document.getElementById('toast');
+            t.innerText = txt;
+            t.style.backgroundColor = isErr ? '#ef4444' : '#4d9251';
+            t.style.opacity = '1';
+            t.style.transform = 'translateX(-50%) translateY(10px)';
+            setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateX(-50%) translateY(-10px)'; }, 3000);
+        };
+
+        function copyCard() {
+            const el = document.createElement('textarea');
+            el.value = "+79509568954";
+            document.body.appendChild(el); el.select();
+            document.execCommand('copy'); document.body.removeChild(el);
+            window.showToast("СКОПИРОВАНО");
+            tg.HapticFeedback.impactOccurred('medium');
+        }
+
+        window.onload = initApp;
+    </script>
+</body>
+</html>
