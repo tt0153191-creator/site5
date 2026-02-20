@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="referrer" content="no-referrer">
+    <title>Schem Shop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+        // === ДАННЫЕ ОБНОВЛЕНЫ ИЗ ВАШЕГО СКРИНШОТА ===
+        const myConfig = {
+            apiKey: "AIzaSyBHGCps7lEFpoaBkL3CVCf0je7n-568YLM",
+            authDomain: "dfjjh-e4ec9.firebaseapp.com",
+            projectId: "dfjjh-e4ec9",
+            storageBucket: "dfjjh-e4ec9.firebasestorage.app",
+            messagingSenderId: "158757863453",
+            appId: "1:158757863453:web:e20b447cbf25a00af286f4"
+        };
+        // ============================================
+
+        const finalConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) 
+            ? JSON.parse(__firebase_config) 
+            : myConfig;
+
+        const app = initializeApp(finalConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'schem-shop-v1';
+
+        window.db = db;
+        window.appId = appId;
+        window.fb = { doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, deleteDoc, query };
+
+        // Добавлен ID нового администратора (7861794182)
+        const ADMIN_IDS = ['1827728855', '7861794182'];
+
+        async function startAuth() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+            } catch (e) {
+                console.error("Auth Error:", e);
+                window.showToast("ОШИБКА АВТОРИЗАЦИИ", true);
+            }
+
+            onAuthStateChanged(auth, async (user) => {
+                if (!user) return;
+                const tgUser = window.Telegram.WebApp.initDataUnsafe?.user;
+                const userId = tgUser ? tgUser.id.toString() : user.uid; 
+                window.currentUserId = userId;
+
+                // Проверка прав администратора
+                if (ADMIN_IDS.includes(userId)) {
+                    const navAdmin = document.getElementById('nav-admin');
+                    if (navAdmin) navAdmin.classList.remove('hidden');
+                    loadAdminData();
+                }
+
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+                onSnapshot(userRef, (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.data();
+                        document.getElementById('balance-display').innerText = `${(Number(data.balance) || 0).toFixed(2)} ₽`;
+                    } else {
+                        setDoc(userRef, { 
+                            balance: 0, 
+                            name: tgUser?.first_name || 'User', 
+                            userId: userId,
+                            registeredAt: Date.now()
+                        });
+                    }
+                }, (err) => {
+                    if(err.code === 'permission-denied') window.showToast("ОШИБКА ДОСТУПА БД", true);
+                });
+            });
+        }
+
+        window.finalizePayment = async () => {
+            const user = window.Telegram.WebApp.initDataUnsafe?.user || { first_name: 'Guest', id: window.currentUserId };
+            const btn = document.getElementById('send-payment-btn');
+            btn.disabled = true; btn.innerText = "ОТПРАВКА...";
+
+            try {
+                const reqsCollection = collection(db, 'artifacts', appId, 'public', 'data', 'deposit_requests');
+                await addDoc(reqsCollection, {
+                    userId: user.id.toString(),
+                    userName: user.first_name,
+                    amount: Number(window.currentAmount),
+                    photoUrl: window.base64Photo,
+                    timestamp: Date.now()
+                });
+
+                window.showToast("ОТПРАВЛЕНО");
+                window.closeModal('deposit-modal');
+            } catch (e) {
+                window.showToast("ОШИБКА БД", true);
+                btn.disabled = false;
+            }
+        };
+
+        function loadAdminData() {
+            const reqRef = collection(db, 'artifacts', appId, 'public', 'data', 'deposit_requests');
+            onSnapshot(reqRef, (snap) => {
+                const container = document.getElementById('admin-requests-list');
+                if (!container) return;
+                container.innerHTML = snap.empty ? '<p class="text-center py-10 opacity-30 text-[10px] font-black uppercase">Нет заявок</p>' : '';
+                snap.forEach(d => {
+                    const req = d.data();
+                    const div = document.createElement('div');
+                    div.className = 'glass-card mb-4 border-green-500/10';
+                    div.innerHTML = `
+                        <div class="flex justify-between items-start mb-4">
+                            <div><p class="font-black text-white text-sm uppercase">${req.userName}</p></div>
+                            <span class="text-green-400 font-black">${req.amount} ₽</span>
+                        </div>
+                        <img src="${req.photoUrl}" class="w-full h-48 object-cover rounded-xl mb-4 bg-black">
+                        <div class="flex gap-2">
+                            <button class="flex-1 bg-green-600 py-3 rounded-xl text-[9px] font-black" onclick="approveRequest('${d.id}', '${req.userId}', ${req.amount})">ОДОБРИТЬ</button>
+                        </div>
+                    `;
+                    container.appendChild(div);
+                });
+            });
+        }
+
+        window.approveRequest = async (docId, uid, amount) => {
+            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', String(uid));
+            const snap = await getDoc(userRef);
+            if (snap.exists()) {
+                await updateDoc(userRef, { balance: (snap.data().balance || 0) + amount });
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'deposit_requests', docId));
+                window.showToast("ОДОБРЕНО");
+            }
+        };
+
+        startAuth();
+    </script>
+
+    <style>
+        :root { --primary: #4d9251; --bg-dark: #0a0a0a; --card-bg: rgba(22, 22, 22, 0.95); }
+        body { margin: 0; background-color: var(--bg-dark); color: white; font-family: sans-serif; }
+        .stars-background { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: -2; }
+        .container-wrapper { max-width: 480px; margin: 0 auto; padding: 20px 16px 140px; display: flex; flex-direction: column; gap: 16px; }
+        .glass-card { background: var(--card-bg); border-radius: 28px; padding: 24px; border: 1px solid rgba(255,255,255,0.05); }
+        .btn-main { background: var(--primary); color: white; border-radius: 22px; padding: 18px; font-weight: 900; width: 100%; text-transform: uppercase; font-size: 0.75rem; border: none; }
+        .bottom-nav { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; background: #0f0f0f; border-radius: 35px; display: flex; padding: 10px; border: 1px solid rgba(255,255,255,0.1); }
+        .nav-item { flex: 1; display: flex; flex-direction: column; align-items: center; font-size: 10px; color: #555; font-weight: 900; }
+        .nav-item.active { color: var(--primary); }
+        .tab-content { display: none; flex-direction: column; gap: 16px; }
+        .tab-content.active { display: flex; }
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); display: none; justify-content: center; align-items: center; z-index: 1000; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="stars-background"></div>
+    <div id="toast" class="fixed top-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl z-[2000] opacity-0 transition-all pointer-events-none font-black text-[10px]"></div>
+
+    <div class="container-wrapper">
+        <div id="home-tab" class="tab-content active">
+            <div class="glass-card">
+                <h1 class="text-3xl font-black italic">SCHEM SHOP</h1>
+                <p class="text-gray-500 text-[10px] mt-2 uppercase font-bold">Добро пожаловать в закрытый маркет</p>
+            </div>
+            <button class="btn-main" onclick="switchTab('catalog')">В КАТАЛОГ</button>
+        </div>
+
+        <div id="catalog-tab" class="tab-content">
+            <h2 class="text-xl font-black italic">КАТАЛОГ</h2>
+            <div class="glass-card">Товары появятся после настройки БД</div>
+        </div>
+
+        <div id="profile-tab" class="tab-content">
+            <div class="glass-card text-center">
+                <div id="balance-display" class="text-4xl font-black text-green-500">0.00 ₽</div>
+                <p class="text-[10px] uppercase font-black text-gray-500 mt-2">ВАШ БАЛАНС</p>
+            </div>
+            <button class="btn-main" onclick="openModal('deposit-modal')">ПОПОЛНИТЬ</button>
+        </div>
+
+        <div id="admin-tab" class="tab-content">
+            <h2 class="text-xl font-black italic">ЗАЯВКИ</h2>
+            <div id="admin-requests-list"></div>
+        </div>
+    </div>
+
+    <div id="deposit-modal" class="modal">
+        <div class="glass-card w-full max-w-[340px]" id="deposit-form">
+            <h2 class="font-black text-center mb-4">СУММА (₽)</h2>
+            <input type="number" id="deposit-amount" class="w-full bg-black border border-white/10 rounded-xl p-4 text-center text-2xl font-black text-green-500" value="500">
+            <button class="btn-main mt-4" onclick="initiatePayment()">ДАЛЕЕ</button>
+            <button class="w-full mt-2 text-[10px] text-gray-500" onclick="closeModal('deposit-modal')">ОТМЕНА</button>
+        </div>
+        <div class="glass-card w-full max-w-[340px] hidden" id="payment-details">
+            <p class="text-center font-black mb-2 text-green-500">+79509568954 (OZON)</p>
+            <div class="w-full h-32 border-2 border-dashed border-white/20 rounded-xl flex items-center justify-center cursor-pointer overflow-hidden" onclick="document.getElementById('receipt-file').click()">
+                <span id="upload-label" class="text-[10px] font-black">ПРИКРЕПИТЬ ЧЕК</span>
+                <img id="receipt-preview" class="w-full h-full object-cover hidden">
+            </div>
+            <input type="file" id="receipt-file" class="hidden" onchange="handleFile(this)">
+            <button class="btn-main mt-4" id="send-payment-btn" onclick="finalizePayment()" disabled>ОТПРАВИТЬ</button>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')">🏠<br>ДОМ</div>
+        <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')">💎<br>МАРКЕТ</div>
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile')">👤<br>ПРОФИЛЬ</div>
+        <div class="nav-item hidden" id="nav-admin" onclick="switchTab('admin')">🛠<br>АДМИН</div>
+    </div>
+
+    <script>
+        window.switchTab = (n) => {
+            document.querySelectorAll('.tab-content, .nav-item').forEach(e => e.classList.remove('active'));
+            document.getElementById(n + '-tab').classList.add('active');
+            document.getElementById('nav-' + n).classList.add('active');
+        };
+        window.openModal = (id) => document.getElementById(id).style.display = 'flex';
+        window.closeModal = (id) => {
+            document.getElementById(id).style.display = 'none';
+            document.getElementById('payment-details').classList.add('hidden');
+            document.getElementById('deposit-form').classList.remove('hidden');
+        };
+        window.initiatePayment = () => {
+            window.currentAmount = document.getElementById('deposit-amount').value;
+            document.getElementById('deposit-form').classList.add('hidden');
+            document.getElementById('payment-details').classList.remove('hidden');
+        };
+        window.handleFile = (input) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                window.base64Photo = e.target.result;
+                document.getElementById('receipt-preview').src = window.base64Photo;
+                document.getElementById('receipt-preview').classList.remove('hidden');
+                document.getElementById('upload-label').classList.add('hidden');
+                document.getElementById('send-payment-btn').disabled = false;
+            };
+            reader.readAsDataURL(input.files[0]);
+        };
+        window.showToast = (m, e) => {
+            const t = document.getElementById('toast');
+            t.innerText = m; t.style.background = e ? '#f44' : '#4d9251';
+            t.style.opacity = '1';
+            setTimeout(() => t.style.opacity = '0', 2000);
+        };
+    </script>
+</body>
+</html>
