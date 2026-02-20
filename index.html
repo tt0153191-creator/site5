@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Schem Shop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBHGCps7lEFpoaBkL3CVCf0je7n-568YLM",
+            authDomain: "dfjjh-e4ec9.firebaseapp.com",
+            projectId: "dfjjh-e4ec9",
+            storageBucket: "dfjjh-e4ec9.firebasestorage.app",
+            messagingSenderId: "158757863453",
+            appId: "1:158757863453:web:e20b447cbf25a00af286f4",
+            measurementId: "G-5Q913MJMLY"
+        };
+
+        const appId = "schem-shop-v1"; 
+        let db, auth, currentUser;
+
+        async function init() {
+            const statusEl = document.getElementById('error-status');
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                window.Telegram.WebApp.ready();
+                window.Telegram.WebApp.expand();
+
+                // Авторизация
+                const authResult = await signInAnonymously(auth);
+                currentUser = authResult.user;
+                
+                if (statusEl) {
+                    statusEl.innerText = "СОЕДИНЕНИЕ УСТАНОВЛЕНО";
+                    statusEl.classList.replace('bg-orange-500/20', 'bg-green-500/20');
+                    statusEl.classList.replace('text-orange-500', 'text-green-500');
+                    setTimeout(() => statusEl.style.display = 'none', 2000);
+                }
+                
+                startApp(currentUser);
+            } catch (e) {
+                console.error(e);
+                if (statusEl) {
+                    statusEl.innerText = "ОШИБКА ПОДКЛЮЧЕНИЯ";
+                    statusEl.classList.replace('bg-orange-500/20', 'bg-red-500/20');
+                    statusEl.classList.replace('text-orange-500', 'text-red-500');
+                }
+            }
+        }
+
+        function startApp(user) {
+            const tg = window.Telegram.WebApp.initDataUnsafe;
+            // Ваш ID 1827728855 будет распознан автоматически
+            const userId = tg?.user?.id ? tg.user.id.toString() : user.uid;
+            window.currentUserId = userId;
+
+            const ADMIN_IDS = ['1827728855', '7861794182'];
+            if (ADMIN_IDS.includes(userId)) {
+                document.getElementById('nav-admin').classList.remove('hidden');
+            }
+
+            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+            onSnapshot(userRef, (snap) => {
+                if (snap.exists()) {
+                    const bal = snap.data().balance || 0;
+                    document.getElementById('balance-display').innerText = `${bal.toLocaleString()} ₽`;
+                    document.getElementById('profile-bal').innerText = `${bal.toLocaleString()} ₽`;
+                } else {
+                    setDoc(userRef, {
+                        balance: 0,
+                        name: tg?.user?.first_name || 'Клиент',
+                        userId: userId,
+                        joined: Date.now()
+                    });
+                }
+            }, (err) => {
+                if(err.code === 'permission-denied') {
+                    window.showToast("ОШИБКА ПРАВ В FIREBASE", true);
+                }
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+
+        // Интерфейс и навигация
+        window.switchTab = (t) => {
+            document.querySelectorAll('.tab, .nav-item').forEach(e => e.classList.remove('active'));
+            document.getElementById(t + '-tab')?.classList.add('active');
+            document.getElementById('nav-' + t)?.classList.add('active');
+            if(t === 'admin') window.loadAdminRequests();
+            window.Telegram.WebApp.HapticFeedback.selectionChanged();
+        };
+
+        window.showToast = (m, isErr) => {
+            const t = document.getElementById('toast');
+            t.innerText = m;
+            t.className = `fixed top-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl z-[2000] font-black text-[10px] uppercase shadow-2xl transition-all duration-500`;
+            t.style.background = isErr ? '#ef4444' : '#22c55e';
+            t.style.opacity = '1';
+            t.style.transform = 'translate(-50%, 0)';
+            setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, -20px)'; }, 3000);
+        };
+
+        window.handleFile = (i) => {
+            const file = i.files[0];
+            if(!file) return;
+            const r = new FileReader();
+            r.onload = (e) => {
+                window.base64Photo = e.target.result;
+                document.getElementById('f-prev').src = e.target.result;
+                document.getElementById('f-prev').classList.remove('hidden');
+                document.getElementById('f-lab').classList.add('hidden');
+                document.getElementById('send-btn').disabled = false;
+            };
+            r.readAsDataURL(file);
+        };
+
+        window.sendRequest = async () => {
+            const btn = document.getElementById('send-btn');
+            const amt = Number(document.getElementById('d-amount').value);
+            btn.innerText = "ОТПРАВКА...";
+            btn.disabled = true;
+
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'requests'), {
+                    userId: window.currentUserId,
+                    userName: window.Telegram.WebApp.initDataUnsafe?.user?.first_name || 'Unknown',
+                    amount: amt,
+                    photo: window.base64Photo,
+                    status: 'pending',
+                    timestamp: Date.now()
+                });
+                window.showToast("ЧЕК ОТПРАВЛЕН НА ПРОВЕРКУ");
+                document.getElementById('deposit-modal').style.display = 'none';
+            } catch (e) {
+                window.showToast("ОШИБКА СОХРАНЕНИЯ", true);
+            } finally {
+                btn.innerText = "ПОДТВЕРДИТЬ";
+                btn.disabled = false;
+            }
+        };
+
+        window.loadAdminRequests = () => {
+            const list = document.getElementById('admin-requests-list');
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'requests'), (snap) => {
+                list.innerHTML = '';
+                snap.forEach(docSnap => {
+                    const r = docSnap.data();
+                    if(r.status !== 'pending') return;
+                    const div = document.createElement('div');
+                    div.className = 'glass-card mb-4 overflow-hidden p-0';
+                    div.innerHTML = `
+                        <div class="p-4 border-b border-white/5">
+                            <p class="text-[10px] font-black text-gray-500 uppercase">ОТ: ${r.userName} (ID: ${r.userId})</p>
+                            <p class="text-xl font-black">${r.amount} ₽</p>
+                        </div>
+                        <img src="${r.photo}" class="w-full h-56 object-cover border-b border-white/5">
+                        <div class="p-3 flex gap-2">
+                            <button class="flex-1 bg-green-500 py-4 rounded-xl text-[10px] font-black uppercase" onclick="window.modReq('${docSnap.id}', '${r.userId}', ${r.amount}, 'approved')">ПРИНЯТЬ</button>
+                            <button class="flex-1 bg-red-500 py-4 rounded-xl text-[10px] font-black uppercase" onclick="window.modReq('${docSnap.id}', null, 0, 'rejected')">ОТКЛОНИТЬ</button>
+                        </div>
+                    `;
+                    list.appendChild(div);
+                });
+            });
+        };
+
+        window.modReq = async (id, uid, amt, status) => {
+            try {
+                if (status === 'approved') {
+                    const uRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', uid);
+                    const uSnap = await getDoc(uRef);
+                    const curBal = uSnap.exists() ? (uSnap.data().balance || 0) : 0;
+                    await updateDoc(uRef, { balance: curBal + amt });
+                }
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'requests', id), { status });
+                window.showToast("ГОТОВО");
+            } catch (e) { window.showToast("ОШИБКА ПРАВ", true); }
+        };
+    </script>
+
+    <style>
+        :root { --primary: #4d9251; --bg: #050505; }
+        body { background: var(--bg); color: white; font-family: -apple-system, sans-serif; margin: 0; padding: 0; user-select: none; }
+        .container { max-width: 450px; margin: 0 auto; padding: 20px 16px 100px; }
+        .glass-card { background: rgba(20,20,20,0.8); border-radius: 28px; padding: 20px; border: 1px solid rgba(255,255,255,0.05); backdrop-filter: blur(10px); }
+        .btn-main { background: var(--primary); color: white; border-radius: 20px; padding: 20px; font-weight: 900; width: 100%; text-transform: uppercase; font-size: 11px; letter-spacing: 1.5px; transition: 0.2s; border: none; }
+        .btn-main:active { transform: scale(0.96); opacity: 0.8; }
+        .bottom-nav { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); width: 92%; background: rgba(15,15,15,0.95); border-radius: 32px; display: flex; padding: 8px; border: 1px solid rgba(255,255,255,0.1); z-index: 100; box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        .nav-item { flex: 1; text-align: center; font-size: 8px; font-weight: 900; color: #444; text-transform: uppercase; padding: 14px 0; border-radius: 24px; transition: 0.3s; }
+        .nav-item.active { color: white; background: rgba(255,255,255,0.08); }
+        .tab { display: none; flex-direction: column; gap: 16px; animation: slideUp 0.4s cubic-bezier(0, 0, 0.2, 1); }
+        .tab.active { display: flex; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); display: none; align-items: flex-end; z-index: 1000; }
+        .modal-content { background: #0a0a0a; width: 100%; border-radius: 36px 36px 0 0; padding: 32px 24px 48px; border-top: 1px solid rgba(255,255,255,0.1); }
+    </style>
+</head>
+<body>
+    <div id="toast" class="opacity-0"></div>
+
+    <div class="container">
+        <!-- Главная -->
+        <div id="home-tab" class="tab active">
+            <div class="glass-card text-center py-12">
+                <div id="error-status" class="inline-block bg-orange-500/20 text-orange-500 text-[8px] font-black px-4 py-1.5 rounded-full mb-6 uppercase tracking-widest">Подключение к Firebase...</div>
+                <h1 class="text-5xl font-black italic tracking-tighter mb-2">SCHEM SHOP</h1>
+                <p class="text-[10px] text-gray-500 uppercase font-black tracking-[0.2em]">Цифровой арсенал</p>
+            </div>
+            
+            <div class="glass-card flex items-center justify-between py-8">
+                <div>
+                    <p class="text-[10px] font-black text-gray-500 uppercase mb-1">Баланс счета</p>
+                    <p id="balance-display" class="text-4xl font-black tracking-tight">0 ₽</p>
+                </div>
+                <div class="w-14 h-14 bg-green-500/10 rounded-2xl flex items-center justify-center text-2xl">💰</div>
+            </div>
+
+            <button class="btn-main shadow-lg shadow-green-900/20" onclick="switchTab('catalog')">ПЕРЕЙТИ К ПОКУПКАМ</button>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div class="glass-card p-8 text-center" onclick="switchTab('profile')">
+                    <div class="text-3xl mb-3">👤</div>
+                    <div class="text-[9px] font-black uppercase text-gray-400">Кабинет</div>
+                </div>
+                <div class="glass-card p-8 text-center opacity-40">
+                    <div class="text-3xl mb-3">⚡</div>
+                    <div class="text-[9px] font-black uppercase text-gray-400">Акции</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Каталог -->
+        <div id="catalog-tab" class="tab">
+            <div class="flex justify-between items-center px-2 mb-2">
+                <h2 class="font-black italic text-2xl uppercase tracking-tighter">Магазин</h2>
+            </div>
+            <div class="glass-card py-24 text-center">
+                <p class="text-[10px] font-black uppercase text-gray-600 tracking-widest">Обновление ассортимента...</p>
+            </div>
+        </div>
+
+        <!-- Профиль -->
+        <div id="profile-tab" class="tab">
+            <h2 class="font-black italic text-2xl px-2 uppercase tracking-tighter">Профиль</h2>
+            <div class="glass-card text-center py-12 mb-2">
+                <p id="profile-bal" class="text-6xl font-black text-green-500 mb-2">0 ₽</p>
+                <p class="text-[10px] uppercase font-black text-gray-500 tracking-widest">Ваш баланс</p>
+            </div>
+            <button class="btn-main" onclick="document.getElementById('deposit-modal').style.display = 'flex'">ПОПОЛНИТЬ БАЛАНС</button>
+            <div class="glass-card mt-2">
+                <p class="text-[10px] font-black text-gray-500 uppercase mb-4">История операций</p>
+                <p class="text-center py-4 text-[9px] font-black text-gray-700 uppercase">Список пуст</p>
+            </div>
+        </div>
+
+        <!-- Админка -->
+        <div id="admin-tab" class="tab">
+            <h2 class="font-black italic text-2xl px-2 text-orange-500 uppercase tracking-tighter">Заявки на оплату</h2>
+            <div id="admin-requests-list"></div>
+        </div>
+    </div>
+
+    <!-- Модалка оплаты -->
+    <div id="deposit-modal" class="modal">
+        <div class="modal-content">
+            <div class="w-12 h-1.5 bg-white/10 mx-auto mb-8 rounded-full"></div>
+            
+            <div class="bg-white/5 rounded-3xl p-8 mb-8 text-center border border-white/5" onclick="navigator.clipboard.writeText('+79509568954'); window.showToast('НОМЕР СКОПИРОВАН')">
+                <p class="text-[9px] uppercase font-black text-gray-500 mb-2">РЕКВИЗИТЫ ОПЛАТЫ (OZON / СБП)</p>
+                <p class="text-3xl font-black tracking-tighter text-white">+7 950 956 89 54</p>
+                <p class="text-[8px] text-green-500 font-black mt-3 uppercase tracking-wider">Нажмите для копирования</p>
+            </div>
+
+            <div class="flex flex-col gap-4 mb-8">
+                <label class="text-[10px] font-black text-gray-500 uppercase ml-2">Сумма пополнения (₽)</label>
+                <input type="number" id="d-amount" class="w-full bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-3xl font-black outline-none text-white focus:border-green-500/50 transition-all" placeholder="500" value="500">
+            </div>
+            
+            <div class="border-2 border-dashed border-white/10 rounded-3xl p-10 text-center mb-8 bg-white/[0.02]" onclick="document.getElementById('f').click()">
+                <div id="f-lab">
+                    <p class="text-4xl mb-3">🖼️</p>
+                    <p class="text-[10px] font-black text-gray-500 uppercase tracking-widest">ПРИКРЕПИТЬ СКРИН ЧЕКА</p>
+                </div>
+                <img id="f-prev" class="hidden w-full h-40 object-contain rounded-xl">
+            </div>
+
+            <input type="file" id="f" class="hidden" accept="image/*" onchange="handleFile(this)">
+            <button class="btn-main" id="send-btn" onclick="sendRequest()" disabled>ОТПРАВИТЬ ЧЕК</button>
+            <button class="w-full mt-8 text-[10px] text-gray-600 font-black uppercase tracking-[0.3em]" onclick="document.getElementById('deposit-modal').style.display='none'">ОТМЕНА</button>
+        </div>
+    </div>
+
+    <!-- Навигация -->
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')">ГЛАВНАЯ</div>
+        <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')">МАРКЕТ</div>
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile')">ПРОФИЛЬ</div>
+        <div id="nav-admin" class="nav-item hidden text-orange-500" onclick="switchTab('admin')">АДМИН</div>
+    </div>
+</body>
+</html>
