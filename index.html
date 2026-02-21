@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Schem Shop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc, updateDoc, getDoc, collection, addDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBHGCps7lEFpoaBkL3CVCF0je7n-568YLM",
+            authDomain: "dfjjh-e4ec9.firebaseapp.com",
+            projectId: "dfjjh-e4ec9",
+            storageBucket: "dfjjh-e4ec9.firebasestorage.app",
+            messagingSenderId: "158757863453",
+            appId: "1:158757863453:web:e20b447cbf25a00af286f4",
+            measurementId: "G-5Q913MJMLY"
+        };
+
+        const appId = "schem-shop-v1"; 
+        let db, auth;
+
+        const ADMIN_IDS = ['7861794182', '1827728855'];
+
+        const PRODUCTS = {
+            'mining_servers': {
+                id: 'mining_servers',
+                title: 'Зарабатываем на майнинг серверах 2.0',
+                price: 450,
+                category: 'Схемы',
+                description: 'Обновленная приватная схема пассивного дохода через VPS и AI-вычисления.',
+                content: `
+                    <div class="space-y-6">
+                        <div class="p-4 bg-green-500/10 border border-green-500/20 rounded-2xl">
+                            <p class="font-black text-green-500 text-[10px] uppercase mb-1 text-center">ОБНОВЛЕНИЕ ОТ 21 ИЮНЯ 2025</p>
+                            <p class="text-[11px] leading-relaxed uppercase font-bold text-gray-200 text-center">
+                                ПРИВАТНАЯ СХЕМА 2.0 — СТАБИЛЬНЫЙ ПАССИВНЫЙ ДОХОД
+                            </p>
+                        </div>
+                        <img src="https://telegra.ph/file/15f8d9b19e99a80e461b6.jpg" onerror="this.src='https://imgfy.ru/ib/ZYlxtEF6H8Rnd6o_1771604576.jpg'" class="w-full rounded-2xl border border-white/10 shadow-lg" alt="Main Banner">
+                        <div class="space-y-3">
+                            <p class="text-[13px] leading-relaxed">June 21, 2025</p>
+                            <p class="text-[13px] leading-relaxed">Приветствую, абузеры! Сегодня поделюсь обновлённой приватной схемой, которая приносит мне стабильный пассивный доход. Никаких сложных настроек и никаких рисков. Просто покупаешь VPS, подключаешь к майнинг-сети и получаешь деньги каждый день. Работать можно с любого устройства, не понадобятся никакие знания.</p>
+                        </div>
+                        <div class="space-y-3">
+                            <p class="font-black text-sm text-green-500 uppercase italic">СУТЬ СХЕМЫ</p>
+                            <p class="text-[12px]">Есть определенные сервисы, которые автоматически подключают любой VPS сервер к распределенной майнинг-сети. Тебе не нужно ничего настраивать, устанавливать софт или разбираться в технической части. Просто добавляешь сервер в бота и он начинает приносить доход. Фишка в том, что сеть майнит не обычную крипту, а использует вычислительные мощности для AI задач, рендеринга и других высокооплачиваемых вычислений. Поэтому доходность в разы выше обычного майнинга.</p>
+                        </div>
+                        <div class="space-y-4">
+                            <p class="font-black text-sm text-green-500 uppercase italic">ПОШАГОВАЯ ИНСТРУКЦИЯ</p>
+                            <p class="text-[12px]"><strong>1)</strong> Переходим в данного бота (клик) и жмём "VPS сервера". Можно также приобрести сервер через сайт ruvds.com, но у них в несколько раз цены дороже, а также нужно пройти верификацию.</p>
+                            <p class="text-[12px]"><strong>2)</strong> Выбираем сервер по бюджету. Правило простое: чем дороже вы покупаете сервер, тем соответственно лучше характеристики и больше прибыль.</p>
+                            <p class="text-[12px]"><strong>3)</strong> После покупки мы получаем текст с данными для входа.</p>
+                            <p class="text-[12px]"><strong>4)</strong> Переходим в @MinerVPSbot и нажимаем "Добавить сервер", далее вставляем тот текст.</p>
+                            <p class="text-[12px]"><strong>5)</strong> Далее бот автоматически подключается к серверу. Процесс занимает 5-10 минут.</p>
+                        </div>
+                    </div>
+                `
+            },
+            'money_manual': {
+                id: 'money_manual',
+                title: 'Покупка фальши (Manual)',
+                price: 600,
+                category: 'Мануалы',
+                description: 'Изготовление и сбыт фальшивых российских рублей люкс-качества (1000 и 5000 руб).',
+                content: `
+                    <div class="space-y-6">
+                        <div class="p-4 bg-orange-500/10 border border-orange-500/20 rounded-2xl">
+                            <p class="font-black text-orange-500 text-[10px] uppercase mb-1 text-center">ИНФОРМАЦИЯ ПО ПРОДУКЦИИ</p>
+                            <p class="text-[11px] leading-relaxed uppercase font-bold text-gray-200 text-center">
+                                ВАЛИДНОСТЬ 98% — ПРОХОДЯТ БАНКОМАТЫ И ТЕРМИНАЛЫ
+                            </p>
+                        </div>
+
+                        <div class="space-y-4 text-[13px] leading-relaxed text-gray-300">
+                            <p>Мы специализируемся на изготовлении и сбыте фальшивых российских рублей люкс-качества. За долгие годы проб и ошибок нами была в совершенстве освоена технология изготовления фальшивых купюр номиналом 1000 и 5000 рублей и достигнута валидность 98%!!!</p>
+                            <p>Наши поддельные купюры принимают банкоматы, терминалы и счетчики купюр. Внешне и на ощупь, без проведения экспертизы, определить подделку практически невозможно.</p>
+                        </div>
+
+                        <div class="space-y-4">
+                            <p class="font-black text-sm text-green-500 uppercase italic">ОСОБЕННОСТИ ПРОДУКЦИИ</p>
+                            
+                            <div class="space-y-2">
+                                <p class="text-[12px] font-bold text-white underline decoration-green-500/50">Бумага:</p>
+                                <p class="text-[12px]">В отличие от большинства "коллег" мы не экономим и используем только бумагу высокого качества со специальной пропиткой, подложка из хлопкового субстрата, как в оригинале. При контакте наши купюры имеют характерный хруст, фактуру, схожую с оригиналом и не вызывают отторжения.</p>
+                            </div>
+
+                            <div class="space-y-2">
+                                <p class="text-[12px] font-bold text-white underline decoration-green-500/50">Чернила:</p>
+                                <p class="text-[12px]">Используются максимально приближенные к оригиналу аналоги иностранного производства, а так же собственные разработки, полученные методом газожидкостной хроматографии. При намокании не расплываются, не выгорают.</p>
+                            </div>
+
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="p-3 bg-white/5 rounded-xl border border-white/10">
+                                    <p class="text-[10px] text-gray-400 uppercase font-black mb-1">Фольгированная нить</p>
+                                    <p class="text-[11px] font-bold text-green-500">ПРИСУТСТВУЕТ</p>
+                                </div>
+                                <div class="p-3 bg-white/5 rounded-xl border border-white/10">
+                                    <p class="text-[10px] text-gray-400 uppercase font-black mb-1">Голограмма</p>
+                                    <p class="text-[11px] font-bold text-green-500">ИЗМЕНЯЕТ ЦВЕТ</p>
+                                </div>
+                            </div>
+
+                            <div class="p-4 bg-blue-500/10 border border-blue-500/20 rounded-xl">
+                                <p class="text-[12px]"><span class="font-black text-blue-400 uppercase">УФ-ТЕСТ:</span> Проходят УФ-детектор, УФ-волокна присутствуют. Абсолютно все купюры проходят контроль на строгом детекторе Cassida перед продажей.</p>
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <p class="font-black text-sm text-green-500 uppercase italic">ОПЛАТА И ДОСТАВКА</p>
+                            <p class="text-[12px]">Предлагаем анонимные варианты оплаты: Киви кошелек, крипто кошелек (BTC). Возможна сделка через гарант-сервис форума.</p>
+                            
+                            <div class="space-y-3">
+                                <div class="p-3 border-l-2 border-green-500 bg-white/5">
+                                    <p class="text-[12px] font-bold">1. Закладки</p>
+                                    <p class="text-[11px] text-gray-400">В крупных городах всегда в наличии, уточнять в ТГ.</p>
+                                </div>
+                                <div class="p-3 border-l-2 border-green-500 bg-white/5">
+                                    <p class="text-[12px] font-bold">2. СДЭК, Боксберри, DHL</p>
+                                    <p class="text-[11px] text-gray-400">Анонимная доставка в ПВЗ/постаматы практически любого города.</p>
+                                </div>
+                            </div>
+                            
+                            <p class="text-[12px]">Купюры тщательно маскируются под предметы хозяйственно-бытового назначения для обеспечения максимальной анонимности.</p>
+                        </div>
+
+                        <div class="space-y-4">
+                            <p class="font-black text-sm text-green-500 uppercase italic">ЦЕНЫ И ПРЕДЛОЖЕНИЯ</p>
+                            <div class="p-4 bg-white/5 border border-white/10 rounded-2xl">
+                                <p class="text-[12px] font-bold mb-2">Пробный пакет "Микс" — 20 000 руб.</p>
+                                <p class="text-[11px] text-gray-400">5 купюр по 5к + 25 купюр по 1к. Идеально для первого раза.</p>
+                            </div>
+                            <p class="text-[12px]">Работаем по 100% предоплате! Без исключений. Доставка на дропов, оплата за счет клиента (30-80$).</p>
+                        </div>
+
+                        <div class="p-6 bg-green-500 rounded-3xl text-center shadow-xl shadow-green-500/20">
+                            <p class="text-black font-black text-xs uppercase mb-4">Для заказа писать:</p>
+                            <a href="https://t.me/bodryi_hr" target="_blank" class="block bg-black text-white py-4 rounded-2xl font-black text-sm uppercase tracking-tighter">СВЯЗАТЬСЯ: @bodryi_hr</a>
+                        </div>
+
+                        <div class="py-4 border-t border-white/5 text-center">
+                            <p class="text-[10px] text-gray-500 italic">Проверку на форуме пройти готовы, внесем депозит $4000. Пробников и долгов нет.</p>
+                        </div>
+                    </div>
+                `
+            },
+            'phone_hack': {
+                id: 'phone_hack',
+                title: 'Взлом телефона',
+                price: 300,
+                category: 'Скрипты',
+                description: 'Полный гайд по эксплуатации уязвимостей Android через Metasploit.',
+                content: `
+                    <div class="space-y-6">
+                        <div class="p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+                            <p class="font-black text-red-500 text-[10px] uppercase mb-1 text-center">ЭТИЧНЫЙ ХАКИНГ</p>
+                            <p class="text-[11px] leading-relaxed uppercase font-bold text-gray-200 text-center">ИСПОЛЬЗУЙТЕ ТОЛЬКО ДЛЯ ТЕСТИРОВНИЯ</p>
+                        </div>
+                        <p class="text-[13px] leading-relaxed">Мы разберем классический метод создания "полезной нагрузки" (payload) для удаленного доступа к Android-устройству (RAT).</p>
+                    </div>
+                `
+            }
+        };
+
+        async function init() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                window.Telegram.WebApp.ready();
+                window.Telegram.WebApp.expand();
+                onAuthStateChanged(auth, (user) => {
+                    if (user) startApp(user);
+                    else signInAnonymously(auth).catch(err => console.error(err));
+                });
+            } catch (e) { console.error(e); }
+        }
+
+        function startApp(user) {
+            const tg = window.Telegram.WebApp.initDataUnsafe;
+            const userId = tg?.user?.id ? tg.user.id.toString() : user.uid;
+            window.currentUserId = userId;
+            const firstName = tg?.user?.first_name || 'Клиент';
+            const username = tg?.user?.username ? `@${tg.user.username}` : '';
+            
+            document.getElementById('user-welcome-name').innerText = firstName;
+            document.getElementById('prof-name').innerText = firstName;
+            document.getElementById('prof-username').innerText = username;
+            
+            if (ADMIN_IDS.includes(userId)) document.getElementById('nav-admin').classList.remove('hidden');
+
+            const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', userId);
+            onSnapshot(userRef, (snap) => {
+                const isFirstLoad = !window.userData;
+                if (snap.exists()) {
+                    window.userData = snap.data();
+                    document.getElementById('profile-bal').innerText = `${(window.userData.balance || 0).toLocaleString('ru-RU')} ₽`;
+                } else {
+                    const newUser = { balance: 0, name: firstName, username, userId, inventory: [], joined: Date.now() };
+                    setDoc(userRef, newUser);
+                    window.userData = newUser;
+                }
+                if (isFirstLoad) setTimeout(() => window.switchTab('catalog'), 800);
+            });
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+
+        window.switchTab = (t) => {
+            document.querySelectorAll('.tab, .nav-item').forEach(e => e.classList.remove('active'));
+            document.getElementById(t + '-tab')?.classList.add('active');
+            document.getElementById('nav-' + t)?.classList.add('active');
+            if(t === 'admin') window.switchAdminSubTab('requests');
+            window.Telegram.WebApp.HapticFeedback.selectionChanged();
+        };
+
+        window.switchAdminSubTab = (sub) => {
+            document.querySelectorAll('.admin-sub-tab').forEach(e => e.classList.add('hidden'));
+            document.querySelectorAll('.admin-nav-btn').forEach(e => {
+                e.classList.remove('bg-orange-500', 'text-black');
+                e.classList.add('bg-white/5', 'text-white/40');
+            });
+            document.getElementById('admin-' + sub).classList.remove('hidden');
+            const activeBtn = document.getElementById('btn-admin-' + sub);
+            if (activeBtn) {
+                activeBtn.classList.remove('bg-white/5', 'text-white/40');
+                activeBtn.classList.add('bg-orange-500', 'text-black');
+            }
+            if(sub === 'requests') window.loadAdminRequests();
+            if(sub === 'users') window.loadAdminUsers();
+        };
+
+        window.openCategory = (name) => {
+            const list = document.getElementById('category-products-list');
+            list.innerHTML = '';
+            document.getElementById('cat-name-modal').innerText = name;
+            const catItems = Object.values(PRODUCTS).filter(p => p.category === name);
+            if (catItems.length === 0) {
+                list.innerHTML = '<p class="text-gray-500 text-[10px] uppercase font-black py-10">Товаров пока нет</p>';
+            } else {
+                catItems.forEach(item => {
+                    const isOwned = window.userData?.inventory?.includes(item.id);
+                    const div = document.createElement('div');
+                    div.className = 'glass-card mb-4 flex justify-between items-center p-6 border-white/5 hover:border-green-500/30 transition-all';
+                    div.innerHTML = `
+                        <div class="text-left">
+                            <p class="font-black text-sm uppercase italic">${item.title}</p>
+                            <p class="text-[9px] text-gray-500 font-bold uppercase mt-1">${isOwned ? 'Приобретено' : item.price + ' ₽'}</p>
+                        </div>
+                        <button onclick="window.handleProductAction('${item.id}')" class="px-6 py-3 rounded-xl text-[10px] font-black uppercase ${isOwned ? 'bg-white/10 text-white' : 'bg-green-500 text-black'}">
+                            ${isOwned ? 'ОТКРЫТЬ' : 'КУПИТЬ'}
+                        </button>
+                    `;
+                    list.appendChild(div);
+                });
+            }
+            document.getElementById('category-modal').style.display = 'flex';
+            window.Telegram.WebApp.HapticFeedback.impactOccurred('medium');
+        };
+
+        window.handleProductAction = async (id) => {
+            const item = PRODUCTS[id];
+            const isOwned = window.userData?.inventory?.includes(id);
+            if (isOwned) { window.showProductContent(id); return; }
+            if ((window.userData.balance || 0) < item.price) { window.showToast("НЕДОСТАТОЧНО СРЕДСТВ", true); return; }
+            try {
+                const userRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', window.currentUserId);
+                const newInv = [...(window.userData.inventory || []), id];
+                const newBal = (window.userData.balance || 0) - item.price;
+                await updateDoc(userRef, { inventory: newInv, balance: newBal });
+                window.showToast("ПОКУПКА ЗАВЕРШЕНА");
+                window.openCategory(item.category);
+                window.showProductContent(id);
+            } catch (e) { window.showToast("ОШИБКА ОПЛАТЫ", true); }
+        };
+
+        window.showProductContent = (id) => {
+            const item = PRODUCTS[id];
+            document.getElementById('content-title').innerText = item.title;
+            document.getElementById('content-body').innerHTML = item.content;
+            document.getElementById('content-modal').style.display = 'flex';
+            document.getElementById('category-modal').style.display = 'none';
+        };
+
+        window.showToast = (m, isErr) => {
+            const t = document.getElementById('toast');
+            t.innerText = m;
+            t.className = `fixed top-8 left-1/2 -translate-x-1/2 px-8 py-4 rounded-2xl z-[2000] font-black text-[10px] uppercase shadow-2xl transition-all duration-500 text-white`;
+            t.style.background = isErr ? '#ef4444' : '#22c55e';
+            t.style.opacity = '1';
+            t.style.transform = 'translate(-50%, 0)';
+            setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translate(-50%, -20px)'; }, 3000);
+        };
+
+        window.handleFile = (i) => {
+            const file = i.files[0];
+            if(!file) return;
+            const r = new FileReader();
+            r.onload = (e) => {
+                window.base64Photo = e.target.result;
+                document.getElementById('f-prev').src = e.target.result;
+                document.getElementById('f-prev').classList.remove('hidden');
+                document.getElementById('f-lab').classList.add('hidden');
+                document.getElementById('send-btn').disabled = false;
+            };
+            r.readAsDataURL(file);
+        };
+
+        window.sendRequest = async () => {
+            const btn = document.getElementById('send-btn');
+            const amt = Number(document.getElementById('d-amount').value);
+            if(amt < 1) return window.showToast("НЕВЕРНАЯ СУММА", true);
+            btn.innerText = "ОТПРАВКА...";
+            btn.disabled = true;
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'requests'), {
+                    userId: window.currentUserId,
+                    userName: window.userData.name || 'Клиент',
+                    amount: amt,
+                    photo: window.base64Photo,
+                    status: 'pending',
+                    timestamp: Date.now()
+                });
+                window.showToast("ОТПРАВЛЕНО");
+                document.getElementById('deposit-modal').style.display = 'none';
+                document.getElementById('f-prev').classList.add('hidden');
+                document.getElementById('f-lab').classList.remove('hidden');
+                window.base64Photo = null;
+            } catch (e) { window.showToast("ОШИБКА", true); }
+            finally { btn.innerText = "ПОДТВЕРДИТЬ"; btn.disabled = false; }
+        };
+
+        window.loadAdminRequests = () => {
+            const list = document.getElementById('admin-requests-list');
+            const qRef = collection(db, 'artifacts', appId, 'public', 'data', 'requests');
+            onSnapshot(qRef, (snap) => {
+                list.innerHTML = '';
+                snap.forEach(docSnap => {
+                    const r = docSnap.data();
+                    if(r.status !== 'pending') return;
+                    const div = document.createElement('div');
+                    div.className = 'glass-card mb-4 overflow-hidden p-0 border-orange-500/20';
+                    div.innerHTML = `
+                        <div class="p-4 flex justify-between items-center bg-white/5">
+                            <div><p class="text-[10px] font-black text-orange-400 uppercase">${r.userName}</p><p class="text-xl font-black">${r.amount} ₽</p></div>
+                        </div>
+                        <img src="${r.photo}" class="w-full h-48 object-cover">
+                        <div class="p-3 flex gap-2">
+                            <button class="flex-1 bg-green-500 py-4 rounded-xl text-[10px] font-black uppercase text-black" onclick="window.modReq('${docSnap.id}', '${r.userId}', ${r.amount}, 'approved')">ПРИНЯТЬ</button>
+                            <button class="flex-1 bg-red-500 py-4 rounded-xl text-[10px] font-black uppercase text-black" onclick="window.modReq('${docSnap.id}', null, 0, 'rejected')">ОТКЛОНИТЬ</button>
+                        </div>
+                    `;
+                    list.appendChild(div);
+                });
+            });
+        };
+
+        window.loadAdminUsers = () => {
+            const list = document.getElementById('admin-users-list');
+            onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'users'), (snap) => {
+                list.innerHTML = '';
+                snap.forEach(docSnap => {
+                    const u = docSnap.data();
+                    const div = document.createElement('div');
+                    div.className = 'glass-card mb-3 flex items-center justify-between py-5 px-6 border-white/5';
+                    div.innerHTML = `<div><p class="text-[13px] font-black uppercase text-white">${u.name}</p><p class="text-[9px] font-bold text-orange-500 uppercase">${u.username}</p></div>
+                                    <div class="text-right"><p class="text-[16px] font-black italic">${u.balance} ₽</p></div>`;
+                    list.appendChild(div);
+                });
+            });
+        };
+
+        window.modReq = async (id, uid, amt, status) => {
+            try {
+                if (status === 'approved') {
+                    const uRef = doc(db, 'artifacts', appId, 'public', 'data', 'users', uid);
+                    const uSnap = await getDoc(uRef);
+                    const curBal = uSnap.exists() ? (uSnap.data().balance || 0) : 0;
+                    await updateDoc(uRef, { balance: curBal + amt });
+                }
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'requests', id), { status });
+                window.showToast("УСПЕШНО");
+            } catch (e) { window.showToast("ОШИБКА", true); }
+        };
+    </script>
+
+    <style>
+        :root { --primary: #4d9251; --bg: #030303; }
+        body { background: var(--bg); color: white; font-family: 'Inter', sans-serif; margin: 0; padding: 0; user-select: none; overflow-x: hidden; }
+        .stars-background { position: fixed; inset: 0; z-index: -1; background: radial-gradient(ellipse at bottom, #1B2735 0%, #090A0F 100%); overflow: hidden; }
+        .star { position: absolute; background: white; border-radius: 50%; opacity: 0.5; animation: twinkle var(--duration) infinite ease-in-out; }
+        @keyframes twinkle { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 1; transform: scale(1.2); } }
+        .container { max-width: 450px; margin: 0 auto; padding: 20px 16px 140px; position: relative; z-index: 1; }
+        .glass-card { background: rgba(255, 255, 255, 0.03); border-radius: 32px; padding: 24px; border: 1px solid rgba(255, 255, 255, 0.08); backdrop-filter: blur(15px); }
+        .btn-main { background: linear-gradient(135deg, #4d9251 0%, #3a6d3d 100%); color: white; border-radius: 24px; padding: 22px; font-weight: 900; width: 100%; text-transform: uppercase; font-size: 11px; letter-spacing: 2px; transition: 0.3s; border: none; box-shadow: 0 8px 20px rgba(77, 146, 81, 0.3); }
+        .btn-main:active { transform: scale(0.95); opacity: 0.9; }
+        .category-item { display: flex; align-items: center; justify-content: space-between; background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.08); padding: 24px; border-radius: 24px; margin-bottom: 12px; transition: 0.2s; backdrop-filter: blur(10px); }
+        .bottom-nav { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); width: 92%; background: rgba(15, 15, 15, 0.85); backdrop-filter: blur(20px); border-radius: 35px; display: flex; padding: 8px; border: 1px solid rgba(255, 255, 255, 0.1); z-index: 100; box-shadow: 0 20px 50px rgba(0,0,0,0.8); }
+        .nav-item { flex: 1; text-align: center; font-size: 8px; font-weight: 900; color: #666; text-transform: uppercase; padding: 16px 0; border-radius: 28px; transition: 0.3s; }
+        .nav-item.active { color: white; background: rgba(255, 255, 255, 0.1); }
+        .tab { display: none; flex-direction: column; gap: 24px; animation: slideUp 0.4s ease; }
+        .tab.active { display: flex; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+        .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: none; align-items: flex-end; z-index: 1000; }
+        .modal-content { background: #0c0c0c; width: 100%; border-radius: 40px 40px 0 0; padding: 30px 20px 60px; border-top: 1px solid rgba(255,255,255,0.1); max-height: 90vh; overflow-y: auto; }
+        .admin-nav-btn { flex: 1; padding: 14px; border-radius: 18px; font-size: 9px; font-weight: 900; text-transform: uppercase; transition: 0.3s; }
+        code { background: rgba(255,255,255,0.1); padding: 2px 6px; border-radius: 6px; font-family: monospace; color: #4d9251; }
+    </style>
+</head>
+<body>
+    <div class="stars-background" id="stars-container"></div>
+    <div id="toast" class="opacity-0 pointer-events-none"></div>
+
+    <div class="container">
+        <!-- Главная -->
+        <div id="home-tab" class="tab active">
+            <div class="glass-card p-0 overflow-hidden mb-2">
+                <img src="https://imgfy.ru/ib/ZYlxtEF6H8Rnd6o_1771604576.jpg" class="w-full h-52 object-cover">
+                <div class="p-8 text-center">
+                    <h1 class="text-3xl font-black italic uppercase tracking-tighter mb-1">С возвращением,</h1>
+                    <h2 id="user-welcome-name" class="text-xl font-black text-green-500 uppercase mb-4">...</h2>
+                    <p class="text-[9px] text-gray-500 font-bold uppercase tracking-[0.2em]">Лучшие схемы и софт в одном месте</p>
+                </div>
+            </div>
+            <button class="btn-main" onclick="switchTab('catalog')">ОТКРЫТЬ КАТАЛОГ</button>
+        </div>
+
+        <!-- Каталог -->
+        <div id="catalog-tab" class="tab">
+            <h2 class="font-black italic text-3xl px-2 uppercase tracking-tighter">Магазин</h2>
+            <div>
+                <div class="category-item" onclick="openCategory('Схемы')">
+                    <div class="flex items-center gap-4"><span>📂</span><span class="font-black uppercase text-sm">Схемы</span></div>
+                    <div class="text-gray-600">→</div>
+                </div>
+                <div class="category-item" onclick="openCategory('Мануалы')">
+                    <div class="flex items-center gap-4"><span>📖</span><span class="font-black uppercase text-sm">Мануалы</span></div>
+                    <div class="text-gray-600">→</div>
+                </div>
+                <div class="category-item" onclick="openCategory('Скрипты')">
+                    <div class="flex items-center gap-4"><span>💻</span><span class="font-black uppercase text-sm">Скрипты (Софт)</span></div>
+                    <div class="text-gray-600">→</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Профиль -->
+        <div id="profile-tab" class="tab">
+            <h2 class="font-black italic text-3xl px-2 uppercase tracking-tighter">Личный кабинет</h2>
+            <div class="glass-card text-center py-8">
+                <h3 id="prof-name" class="text-xl font-black uppercase mb-1">...</h3>
+                <p id="prof-username" class="text-[9px] font-bold text-green-500 uppercase tracking-widest mb-6">@username</p>
+                <p class="text-[10px] uppercase font-black text-gray-500 mb-2">Баланс</p>
+                <p id="profile-bal" class="text-5xl font-black tracking-tighter">0 ₽</p>
+            </div>
+            <button class="btn-main" onclick="document.getElementById('deposit-modal').style.display = 'flex'">ПОПОЛНИТЬ БАЛАНС</button>
+        </div>
+
+        <!-- Админка -->
+        <div id="admin-tab" class="tab">
+            <h2 class="font-black italic text-3xl text-orange-500 uppercase px-2">Панель Управления</h2>
+            <div class="flex gap-2 p-1.5 bg-white/5 rounded-[22px]">
+                <button id="btn-admin-requests" class="admin-nav-btn" onclick="switchAdminSubTab('requests')">Заявки</button>
+                <button id="btn-admin-users" class="admin-nav-btn" onclick="switchAdminSubTab('users')">Юзеры</button>
+            </div>
+            <div id="admin-requests" class="admin-sub-tab">
+                <div id="admin-requests-list" class="mt-4"></div>
+            </div>
+            <div id="admin-users" class="admin-sub-tab hidden">
+                <div id="admin-users-list" class="mt-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модалки -->
+    <div id="category-modal" class="modal">
+        <div class="modal-content text-center">
+            <div class="w-12 h-1 bg-white/10 mx-auto mb-8 rounded-full"></div>
+            <h2 id="cat-name-modal" class="text-2xl font-black uppercase italic mb-8 tracking-tighter">...</h2>
+            <div id="category-products-list"></div>
+            <button class="w-full mt-6 py-4 text-[10px] font-black uppercase text-gray-500" onclick="document.getElementById('category-modal').style.display='none'">НАЗАД</button>
+        </div>
+    </div>
+
+    <div id="content-modal" class="modal">
+        <div class="modal-content">
+            <div class="w-12 h-1 bg-white/10 mx-auto mb-8 rounded-full"></div>
+            <h2 id="content-title" class="text-xl font-black uppercase italic mb-6 tracking-tighter text-green-500"></h2>
+            <div id="content-body" class="text-[13px] leading-relaxed text-gray-300 font-medium"></div>
+            <button class="btn-main mt-10" onclick="document.getElementById('content-modal').style.display='none'">ЗАКРЫТЬ</button>
+        </div>
+    </div>
+
+    <div id="deposit-modal" class="modal">
+        <div class="modal-content">
+            <div class="w-12 h-1 bg-white/10 mx-auto mb-8 rounded-full"></div>
+            <div class="bg-white/5 rounded-[24px] p-8 mb-6 text-center border border-white/5" onclick="navigator.clipboard.writeText('+79509568954'); window.showToast('КОПИРОВАНО')">
+                <p class="text-[9px] uppercase font-black text-gray-500 mb-2">ПЕРЕВОД (OZON/СБП)</p>
+                <p class="text-2xl font-black">+7 950 956 89 54</p>
+            </div>
+            <input type="number" id="d-amount" class="w-full bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-3xl font-black outline-none mb-6" placeholder="Сумма" value="500">
+            <div class="border-2 border-dashed border-white/10 rounded-2xl p-10 text-center mb-6" onclick="document.getElementById('f').click()">
+                <div id="f-lab"><p class="text-3xl mb-2">📎</p><p class="text-[9px] font-black text-gray-500 uppercase">Прикрепи чек</p></div>
+                <img id="f-prev" class="hidden w-full h-32 object-contain">
+            </div>
+            <input type="file" id="f" class="hidden" accept="image/*" onchange="handleFile(this)">
+            <button class="btn-main" id="send-btn" onclick="sendRequest()" disabled>ОТПРАВИТЬ ЧЕК</button>
+            <button class="w-full mt-6 text-[9px] text-gray-600 font-black uppercase" onclick="document.getElementById('deposit-modal').style.display='none'">ОТМЕНА</button>
+        </div>
+    </div>
+
+    <div class="bottom-nav">
+        <div class="nav-item active" id="nav-home" onclick="switchTab('home')">ГЛАВНАЯ</div>
+        <div class="nav-item" id="nav-catalog" onclick="switchTab('catalog')">МАРКЕТ</div>
+        <div class="nav-item" id="nav-profile" onclick="switchTab('profile')">ПРОФИЛЬ</div>
+        <div id="nav-admin" class="nav-item hidden text-orange-500" onclick="switchTab('admin')">АДМИН</div>
+    </div>
+
+    <script>
+        const stars = document.getElementById('stars-container');
+        for (let i = 0; i < 100; i++) {
+            const s = document.createElement('div');
+            s.className = 'star';
+            const sz = Math.random() * 2 + 1 + 'px';
+            s.style.width = sz; s.style.height = sz;
+            s.style.left = Math.random() * 100 + '%';
+            s.style.top = Math.random() * 100 + '%';
+            s.style.setProperty('--duration', Math.random() * 3 + 2 + 's');
+            stars.appendChild(s);
+        }
+    </script>
+</body>
+</html>
